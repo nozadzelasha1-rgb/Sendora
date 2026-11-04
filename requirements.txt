@@ -1,0 +1,18 @@
+# Runtime dependencies (Python 3.12)
+
+# Web framework (includes uvicorn, fastapi-cli, python-multipart)
+fastapi[standard]>=0.115.0
+
+# Validation & settings
+pydantic>=2.9,<3
+pydantic-settings>=2.6,<3
+
+# Database
+sqlalchemy[asyncio]>=2.0.36,<2.1
+asyncpg>=0.30.0
+
+httpx>=0.28.0
+
+# Auth
+pyjwt>=2.10.0
+pwdlib[argon2]>=0.2.1
