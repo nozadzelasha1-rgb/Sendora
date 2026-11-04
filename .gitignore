@@ -1,0 +1,123 @@
+# =========================================================
+# .gitignore for a FastAPI + Python project using Claude
+# =========================================================
+
+# ---------- Secrets & environment ----------
+# Your ANTHROPIC_API_KEY and other secrets live here: never commit them.
+.env
+.env.*
+*.env
+!.env.example
+!.env.sample
+secrets/
+*.pem
+*.key
+
+# ---------- Claude Code ----------
+# Commit CLAUDE.md and .claude/settings.json (shared team config),
+# but ignore personal/local overrides.
+.claude/settings.local.json
+.claude/*.local.*
+CLAUDE.local.md
+
+# ---------- Python bytecode / caches ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ---------- Virtual environments ----------
+.venv/
+venv/
+env/
+ENV/
+.virtualenv/
+.python-version.local
+
+# ---------- Packaging / build ----------
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+*.egg
+.installed.cfg
+MANIFEST
+pip-wheel-metadata/
+
+# Lock files (uv.lock, poetry.lock, pdm.lock) SHOULD be committed for apps,
+# so they are intentionally not listed here.
+
+# ---------- Testing & coverage ----------
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+nosetests.xml
+*.cover
+test-results/
+junit*.xml
+
+# ---------- Linters / type checkers ----------
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+.pyre/
+.pylint.d/
+
+# ---------- Databases (local dev) ----------
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# ---------- Logs ----------
+logs/
+*.log
+
+# ---------- Background workers ----------
+celerybeat-schedule
+celerybeat.pid
+*.pid
+
+# ---------- Local uploads / generated files ----------
+uploads/
+media/
+tmp/
+temp/
+
+# ---------- Jupyter ----------
+.ipynb_checkpoints/
+
+# ---------- Docker ----------
+docker-compose.override.yml
+
+# ---------- IDEs / editors ----------
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------- OS files ----------
+.DS_Store
+Thumbs.db
+desktop.ini
