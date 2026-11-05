@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: sendora-db
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Tbilisi
+      PGTZ: Asia/Tbilisi
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password}
+      POSTGRES_DB: ${POSTGRES_DB:-app_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Данные базы: переживают перезапуск и пересоздание контейнера
+      - pgdata:/var/lib/postgresql/data
+      # SQL/SH-скрипты отсюда выполняются один раз при первом запуске (на пустом volume)
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+    name: project_sendora-db
