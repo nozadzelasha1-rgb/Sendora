@@ -15,8 +15,8 @@ router = APIRouter(prefix='/users', tags=["User"])
     summary="Create a user",
     description="Create a user with a unique username, phone or email.",
     responses={
-        status.HTTP_409_CONFLICT: {"description": "User already exists"},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "Validation error"},
+        status.HTTP_409_CONFLICT: {"description": "მომხმარებელი უკვე არსებობს"},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "ვალიდაციის შეცდომა"},
     },
 )
 async def create_user(
@@ -28,7 +28,7 @@ async def create_user(
     except UserAlreadyExistsError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="User already exists",
+            detail="მომხმარებელი უკვე არსებობს",
         )
     return UserRead.model_validate(user)
 
@@ -43,8 +43,8 @@ async def create_user(
         "or email) and return the user. No token is issued yet."
     ),
     responses={
-        status.HTTP_401_UNAUTHORIZED: {"description": "Invalid credentials"},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "Validation error"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "არასწორი მონაცემები"},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "ვალიდაციის შეცდომა"},
     },
 )
 async def login_user(
@@ -56,7 +56,7 @@ async def login_user(
     except UserNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
+            detail="არასწორი მონაცემები",
         )
     return UserRead.model_validate(user)
 
@@ -70,8 +70,8 @@ async def login_user(
         "request must carry the user's valid credentials."
     ),
     responses={
-        status.HTTP_401_UNAUTHORIZED: {"description": "Invalid credentials"},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "Validation error"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "არასწორი მონაცემები"},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "ვალიდაციის შეცდომა"},
     },
 )
 async def delete_user(
@@ -83,6 +83,6 @@ async def delete_user(
     except UserNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
+            detail="არასწორი მონაცემები",
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
