@@ -1,0 +1,35 @@
+name: sendora-test
+
+services:
+  test-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: sendora_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./tests/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d sendora_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  test-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    volumes:
+      - ./:/app
+    depends_on:
+      test-db:
+        condition: service_healthy
+    environment:
+      TEST_DATABASE_URL: postgresql+asyncpg://test:test@test-db:5432/sendora_test
+      # Dummy values only: they satisfy app settings and never point to the dev DB.
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: sendora_test
+      POSTGRES_PORT: "5432"
