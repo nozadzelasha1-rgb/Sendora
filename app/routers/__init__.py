@@ -19,4 +19,4 @@ app = FastAPI(root_path="/sendora/api",
               #lifespan=lifespan
               )
 
-app.include_router(user_router)
+app.include_router(user_router, prefix=settings.API_PREFIX)
