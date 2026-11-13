@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Awaitable, Callable
 
 import pytest
 from httpx import AsyncClient
@@ -11,6 +12,7 @@ from app.db_entities.users.user import UserDB
 USERS_URL = f"{settings.API_PREFIX}/users"
 LOGIN_URL = f"{USERS_URL}/login"
 DELETE_URL = f"{USERS_URL}/delete"
+ME_URL = f"{USERS_URL}/me"
 PASSWORD = "password123"
 
 
@@ -117,7 +119,7 @@ async def test_create_user_invalid_payload_returns_422(
 # --- POST /users/login ----------------------------------------------------------
 
 
-async def test_login_by_username_returns_200(client: AsyncClient) -> None:
+async def test_login_by_username_returns_token_response(client: AsyncClient) -> None:
     created = await _create(client, username="alice")
 
     response = await client.post(
@@ -126,9 +128,20 @@ async def test_login_by_username_returns_200(client: AsyncClient) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["id"] == created["id"]
-    assert "password" not in body
-    assert "password_hash" not in body
+    assert set(body) == {
+        "access_token",
+        "refresh_token",
+        "token_type",
+        "expires_in",
+        "user",
+    }
+    assert body["token_type"] == "bearer"
+    assert body["expires_in"] == settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    assert isinstance(body["access_token"], str) and body["access_token"]
+    assert isinstance(body["refresh_token"], str) and "." in body["refresh_token"]
+    assert body["user"]["id"] == created["id"]
+    assert "password" not in body["user"]
+    assert "password_hash" not in body["user"]
 
 
 async def test_login_by_phone_returns_200(client: AsyncClient) -> None:
@@ -139,7 +152,7 @@ async def test_login_by_phone_returns_200(client: AsyncClient) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["id"] == created["id"]
+    assert response.json()["user"]["id"] == created["id"]
 
 
 async def test_login_by_email_returns_200(client: AsyncClient) -> None:
@@ -150,7 +163,7 @@ async def test_login_by_email_returns_200(client: AsyncClient) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["id"] == created["id"]
+    assert response.json()["user"]["id"] == created["id"]
 
 
 async def test_login_failures_return_identical_401_bodies(
@@ -198,12 +211,15 @@ async def test_login_wrong_identifier_count_returns_422(
 
 
 async def test_delete_user_valid_credentials_returns_204_and_removes_row(
-    client: AsyncClient, session: AsyncSession
+    client: AsyncClient,
+    session: AsyncSession,
+    bearer_headers: Callable[..., Awaitable[dict[str, str]]],
 ) -> None:
     created = await _create(client, username="alice")
+    headers = await bearer_headers("alice")
 
     response = await client.post(
-        DELETE_URL, json={"username": "alice", "password": PASSWORD}
+        DELETE_URL, json={"username": "alice", "password": PASSWORD}, headers=headers
     )
 
     assert response.status_code == 204
@@ -212,12 +228,17 @@ async def test_delete_user_valid_credentials_returns_204_and_removes_row(
 
 
 async def test_delete_user_wrong_password_returns_401_and_keeps_row(
-    client: AsyncClient, session: AsyncSession
+    client: AsyncClient,
+    session: AsyncSession,
+    bearer_headers: Callable[..., Awaitable[dict[str, str]]],
 ) -> None:
     created = await _create(client, username="alice")
+    headers = await bearer_headers("alice")
 
     response = await client.post(
-        DELETE_URL, json={"username": "alice", "password": "wrong-password"}
+        DELETE_URL,
+        json={"username": "alice", "password": "wrong-password"},
+        headers=headers,
     )
 
     assert response.status_code == 401
@@ -225,12 +246,16 @@ async def test_delete_user_wrong_password_returns_401_and_keeps_row(
     assert await _row_exists(session, str(created["id"])) is True
 
 
-async def test_delete_user_repeat_request_returns_401(client: AsyncClient) -> None:
+async def test_delete_user_repeat_request_returns_401(
+    client: AsyncClient,
+    bearer_headers: Callable[..., Awaitable[dict[str, str]]],
+) -> None:
     await _create(client, username="alice")
+    headers = await bearer_headers("alice")
     body = {"username": "alice", "password": PASSWORD}
-    first = await client.post(DELETE_URL, json=body)
+    first = await client.post(DELETE_URL, json=body, headers=headers)
 
-    second = await client.post(DELETE_URL, json=body)
+    second = await client.post(DELETE_URL, json=body, headers=headers)
 
     assert first.status_code == 204
     assert second.status_code == 401
@@ -245,9 +270,14 @@ async def test_delete_user_repeat_request_returns_401(client: AsyncClient) -> No
     ],
 )
 async def test_delete_user_invalid_body_returns_422(
-    client: AsyncClient, payload: dict[str, object]
+    client: AsyncClient,
+    payload: dict[str, object],
+    bearer_headers: Callable[..., Awaitable[dict[str, str]]],
 ) -> None:
-    response = await client.post(DELETE_URL, json=payload)
+    await _create(client, username="alice")
+    headers = await bearer_headers("alice")
+
+    response = await client.post(DELETE_URL, json=payload, headers=headers)
 
     assert response.status_code == 422
 

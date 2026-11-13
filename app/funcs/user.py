@@ -107,6 +107,19 @@ class User:
         user = await self.get_by_credentials(creds)
         await self.delete(user.id)
 
+    async def delete_user_with_credentials(
+        self, creds: UserCredentials, expected_user_id: uuid.UUID
+    ) -> None:
+        """Delete the user confirmed by credentials if it is the expected user.
+
+        Raise UserNotFoundError if the credentials are invalid or belong to
+        another user.
+        """
+        user = await self.get_by_credentials(creds)
+        if user.id != expected_user_id:
+            raise UserNotFoundError("Credentials do not match the expected user")
+        await self.delete(user.id)
+
     async def delete(self, user_id: uuid.UUID) -> None:
         """Hard-delete an active user; raise UserNotFoundError if missing or inactive."""
         try:
