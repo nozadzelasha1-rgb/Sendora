@@ -23,6 +23,7 @@ from app.funcs.user_session import (
     parse_refresh_token,
 )
 from app.schema.user import UserCreate
+from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
 PASSWORD = "password123"
 NOW = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
@@ -30,8 +31,12 @@ REFRESH_LIFETIME = timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
 GRACE_SECONDS = settings.REFRESH_TOKEN_REUSE_GRACE_SECONDS
 
 
-async def _user_id(session: AsyncSession, username: str = "alice") -> uuid.UUID:
-    user = await User(session).create(UserCreate(username=username, password=PASSWORD))
+async def _user_id(session: AsyncSession, name: str = "alice") -> uuid.UUID:
+    user = await User(session).create(
+        UserCreate(
+            role=TEST_ROLE_ID, organization_id=TEST_ORG_ID, name=name, password=PASSWORD
+        )
+    )
     return user.id
 
 
@@ -388,10 +393,17 @@ async def test_rotate_revoked_session_raises_invalid_and_keeps_original_reason(
 async def test_rotate_inactive_user_revokes_session_with_user_inactive_reason(
     session: AsyncSession,
 ) -> None:
-    user = await User(session).create(UserCreate(username="alice", password=PASSWORD))
+    user = await User(session).create(
+        UserCreate(
+            role=TEST_ROLE_ID,
+            organization_id=TEST_ORG_ID,
+            name="alice",
+            password=PASSWORD,
+        )
+    )
     user_id = user.id
     sid, token = await _create_session(session, user_id)
-    user.is_active = False
+    user.active = False
     await session.commit()
 
     with pytest.raises(SessionInvalidError):
@@ -552,10 +564,17 @@ async def test_get_active_user_expired_session_raises_invalid(
 async def test_get_active_user_inactive_user_raises_invalid(
     session: AsyncSession,
 ) -> None:
-    user = await User(session).create(UserCreate(username="alice", password=PASSWORD))
+    user = await User(session).create(
+        UserCreate(
+            role=TEST_ROLE_ID,
+            organization_id=TEST_ORG_ID,
+            name="alice",
+            password=PASSWORD,
+        )
+    )
     user_id = user.id
     sid, _ = await _create_session(session, user_id)
-    user.is_active = False
+    user.active = False
     await session.commit()
 
     with pytest.raises(SessionInvalidError):

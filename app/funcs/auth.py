@@ -58,14 +58,14 @@ class Auth:
     def create_access_token(
         user: UserDB, session_id: uuid.UUID, expires_delta: timedelta | None = None
     ) -> str:
-        """Create a signed access token with the user id, username and session id."""
+        """Create a signed access token with the user id, name and session id."""
         issued_at = get_local_time()
         lifetime = expires_delta or timedelta(
             minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
         )
         claims = {
             "sub": str(user.id),
-            "username": user.username,
+            "name": user.name,
             "sid": str(session_id),
             "type": ACCESS_TOKEN_TYPE,
             "iat": issued_at,
@@ -88,12 +88,12 @@ class Auth:
             )
             if payload.get("type") != ACCESS_TOKEN_TYPE:
                 raise InvalidTokenError("Invalid token")
-            username = payload.get("username")
-            if username is not None and not isinstance(username, str):
+            name = payload.get("name")
+            if name is not None and not isinstance(name, str):
                 raise InvalidTokenError("Invalid token")
             return TokenUser(
                 id=uuid.UUID(str(payload["sub"])),
-                username=username,
+                name=name,
                 session_id=uuid.UUID(str(payload["sid"])),
             )
         except jwt.ExpiredSignatureError as exc:

@@ -5,7 +5,7 @@ Short operator and frontend guide for JWT access tokens and refresh-token sessio
 ## How it works
 
 - **Access token**: short-lived JWT (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`), sent as `Authorization: Bearer <token>`. It is bound to a session id.
-- **Refresh token**: opaque string `<session id>.<secret>`, valid for `JWT_REFRESH_TOKEN_EXPIRE_DAYS`. Only a SHA-256 hash of the secret is stored in `personal.user_sessions`.
+- **Refresh token**: opaque string `<session id>.<secret>`, valid for `JWT_REFRESH_TOKEN_EXPIRE_DAYS`. Only a SHA-256 hash of the secret is stored in `dbo.user_sessions`.
 - **Rotation**: every `/refresh` invalidates the presented refresh token and returns a new pair. A parallel refresh with the previous token within `REFRESH_TOKEN_REUSE_GRACE_SECONDS` gets 409 and must retry with the tokens from the first response; it does not log the user out.
 - **Reuse detection**: presenting the previous (already rotated) token after the grace window revokes the session (`revoked_reason = 'reuse'`). A wrong or random secret for a known session id does not revoke anything, because the session id is not secret.
 - Revoking a session (logout, logout-all, manual SQL) makes its access tokens stop working immediately.
@@ -51,22 +51,22 @@ All paths are under `API_PREFIX` (default `/v0`).
 
 Run manually; the application never runs DDL or these statements itself.
 
-Revoke all sessions of one user by username:
+Revoke all sessions of one user by name:
 
 ```sql
-UPDATE personal.user_sessions SET revoked_at = now(), revoked_reason = 'manual' WHERE user_id = (SELECT id FROM personal.users WHERE username = '<username>') AND revoked_at IS NULL;
+UPDATE dbo.user_sessions SET revoked_at = now(), revoked_reason = 'manual' WHERE user_id = (SELECT id FROM dbo.users WHERE name = '<name>') AND revoked_at IS NULL;
 ```
 
 Revoke all sessions of one user by user uuid:
 
 ```sql
-UPDATE personal.user_sessions SET revoked_at = now(), revoked_reason = 'manual' WHERE user_id = '<user uuid>' AND revoked_at IS NULL;
+UPDATE dbo.user_sessions SET revoked_at = now(), revoked_reason = 'manual' WHERE user_id = '<user uuid>' AND revoked_at IS NULL;
 ```
 
 Revoke everyone's sessions (all users must log in again):
 
 ```sql
-UPDATE personal.user_sessions SET revoked_at = now(), revoked_reason = 'manual' WHERE revoked_at IS NULL;
+UPDATE dbo.user_sessions SET revoked_at = now(), revoked_reason = 'manual' WHERE revoked_at IS NULL;
 ```
 
 To invalidate every token regardless of sessions (for example a leaked signing key), also rotate `JWT_SECRET_KEY` and restart.
@@ -76,7 +76,7 @@ To invalidate every token regardless of sessions (for example a leaked signing k
 Old rows are also purged per user on each login. Periodic global cleanup:
 
 ```sql
-DELETE FROM personal.user_sessions WHERE expires_at < now() - interval '30 days' OR revoked_at < now() - interval '30 days';
+DELETE FROM dbo.user_sessions WHERE expires_at < now() - interval '30 days' OR revoked_at < now() - interval '30 days';
 ```
 
 ## Known limits

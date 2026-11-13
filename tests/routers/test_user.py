@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings
 from app.db_entities.users.user import UserDB
+from tests.seed import REF_PAYLOAD
 
 USERS_URL = f"{settings.API_PREFIX}/users"
 LOGIN_URL = f"{USERS_URL}/login"
@@ -17,7 +18,11 @@ PASSWORD = "password123"
 
 
 def _payload(**overrides: object) -> dict[str, object]:
-    payload: dict[str, object] = {"username": "alice", "password": PASSWORD}
+    payload: dict[str, object] = {
+        "name": "alice",
+        "password": PASSWORD,
+        **REF_PAYLOAD,
+    }
     payload.update(overrides)
     return payload
 
@@ -39,7 +44,7 @@ async def _row_exists(session: AsyncSession, user_id: str) -> bool:
 async def _deactivate(session: AsyncSession, user_id: str) -> None:
     user = await session.get(UserDB, uuid.UUID(user_id))
     assert user is not None
-    user.is_active = False
+    user.active = False
     await session.commit()
 
 
@@ -51,9 +56,9 @@ async def test_create_user_valid_payload_returns_201(client: AsyncClient) -> Non
 
     assert response.status_code == 201
     body = response.json()
-    assert body["username"] == "alice"
+    assert body["name"] == "alice"
     assert body["email"] == "alice@example.com"
-    assert body["is_active"] is True
+    assert body["active"] is True
     assert "id" in body
 
 
@@ -66,11 +71,11 @@ async def test_create_user_response_excludes_password_fields(
     assert "password_hash" not in body
 
 
-async def test_create_user_duplicate_username_returns_409(client: AsyncClient) -> None:
-    await _create(client, username="alice")
+async def test_create_user_duplicate_name_returns_409(client: AsyncClient) -> None:
+    await _create(client, name="alice")
 
     response = await client.post(
-        USERS_URL, json=_payload(username="alice", phone="+79990000001")
+        USERS_URL, json=_payload(name="alice", phone="+79990000001")
     )
 
     assert response.status_code == 409
@@ -78,20 +83,20 @@ async def test_create_user_duplicate_username_returns_409(client: AsyncClient) -
 
 
 async def test_create_user_duplicate_phone_returns_409(client: AsyncClient) -> None:
-    await _create(client, username="alice", phone="+79991234567")
+    await _create(client, name="alice", phone="+79991234567")
 
     response = await client.post(
-        USERS_URL, json=_payload(username="bob", phone="+79991234567")
+        USERS_URL, json=_payload(name="bob", phone="+79991234567")
     )
 
     assert response.status_code == 409
 
 
 async def test_create_user_duplicate_email_returns_409(client: AsyncClient) -> None:
-    await _create(client, username="alice", email="alice@example.com")
+    await _create(client, name="alice", email="alice@example.com")
 
     response = await client.post(
-        USERS_URL, json=_payload(username="bob", email="alice@example.com")
+        USERS_URL, json=_payload(name="bob", email="alice@example.com")
     )
 
     assert response.status_code == 409
@@ -100,12 +105,12 @@ async def test_create_user_duplicate_email_returns_409(client: AsyncClient) -> N
 @pytest.mark.parametrize(
     "payload",
     [
-        {"username": "al", "password": PASSWORD},  # username too short
-        {"username": "alice", "password": "short"},  # password too short
-        {"username": "alice"},  # password missing
-        {"password": PASSWORD},  # username missing
-        {"username": "alice", "password": PASSWORD, "email": "not-an-email"},
-        {"username": "alice", "password": PASSWORD, "phone": "12ab"},
+        {"name": "al", "password": PASSWORD},  # name too short
+        {"name": "alice", "password": "short"},  # password too short
+        {"name": "alice"},  # password missing
+        {"password": PASSWORD},  # name missing
+        {"name": "alice", "password": PASSWORD, "email": "not-an-email"},
+        {"name": "alice", "password": PASSWORD, "phone": "12ab"},
     ],
 )
 async def test_create_user_invalid_payload_returns_422(
@@ -119,11 +124,11 @@ async def test_create_user_invalid_payload_returns_422(
 # --- POST /users/login ----------------------------------------------------------
 
 
-async def test_login_by_username_returns_token_response(client: AsyncClient) -> None:
-    created = await _create(client, username="alice")
+async def test_login_by_name_returns_token_response(client: AsyncClient) -> None:
+    created = await _create(client, name="alice")
 
     response = await client.post(
-        LOGIN_URL, json={"username": "alice", "password": PASSWORD}
+        LOGIN_URL, json={"name": "alice", "password": PASSWORD}
     )
 
     assert response.status_code == 200
@@ -145,7 +150,7 @@ async def test_login_by_username_returns_token_response(client: AsyncClient) -> 
 
 
 async def test_login_by_phone_returns_200(client: AsyncClient) -> None:
-    created = await _create(client, username="alice", phone="+79991234567")
+    created = await _create(client, name="alice", phone="+79991234567")
 
     response = await client.post(
         LOGIN_URL, json={"phone": "+79991234567", "password": PASSWORD}
@@ -156,7 +161,7 @@ async def test_login_by_phone_returns_200(client: AsyncClient) -> None:
 
 
 async def test_login_by_email_returns_200(client: AsyncClient) -> None:
-    created = await _create(client, username="alice", email="alice@example.com")
+    created = await _create(client, name="alice", email="alice@example.com")
 
     response = await client.post(
         LOGIN_URL, json={"email": "alice@example.com", "password": PASSWORD}
@@ -170,17 +175,15 @@ async def test_login_failures_return_identical_401_bodies(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """Unknown user, inactive user and wrong password must not be distinguishable."""
-    await _create(client, username="alice")
-    inactive = await _create(client, username="inactive")
+    await _create(client, name="alice")
+    inactive = await _create(client, name="inactive")
     await _deactivate(session, str(inactive["id"]))
 
     responses = [
-        await client.post(LOGIN_URL, json={"username": "nobody", "password": PASSWORD}),
+        await client.post(LOGIN_URL, json={"name": "nobody", "password": PASSWORD}),
+        await client.post(LOGIN_URL, json={"name": "inactive", "password": PASSWORD}),
         await client.post(
-            LOGIN_URL, json={"username": "inactive", "password": PASSWORD}
-        ),
-        await client.post(
-            LOGIN_URL, json={"username": "alice", "password": "wrong-password"}
+            LOGIN_URL, json={"name": "alice", "password": "wrong-password"}
         ),
     ]
 
@@ -195,8 +198,8 @@ async def test_login_failures_return_identical_401_bodies(
     "payload",
     [
         {"password": PASSWORD},  # zero identifiers
-        {"username": "alice", "email": "alice@example.com", "password": PASSWORD},
-        {"username": "alice", "phone": "+79991234567", "password": PASSWORD},
+        {"name": "alice", "email": "alice@example.com", "password": PASSWORD},
+        {"name": "alice", "phone": "+79991234567", "password": PASSWORD},
     ],
 )
 async def test_login_wrong_identifier_count_returns_422(
@@ -215,11 +218,11 @@ async def test_delete_user_valid_credentials_returns_204_and_removes_row(
     session: AsyncSession,
     bearer_headers: Callable[..., Awaitable[dict[str, str]]],
 ) -> None:
-    created = await _create(client, username="alice")
+    created = await _create(client, name="alice")
     headers = await bearer_headers("alice")
 
     response = await client.post(
-        DELETE_URL, json={"username": "alice", "password": PASSWORD}, headers=headers
+        DELETE_URL, json={"name": "alice", "password": PASSWORD}, headers=headers
     )
 
     assert response.status_code == 204
@@ -232,12 +235,12 @@ async def test_delete_user_wrong_password_returns_401_and_keeps_row(
     session: AsyncSession,
     bearer_headers: Callable[..., Awaitable[dict[str, str]]],
 ) -> None:
-    created = await _create(client, username="alice")
+    created = await _create(client, name="alice")
     headers = await bearer_headers("alice")
 
     response = await client.post(
         DELETE_URL,
-        json={"username": "alice", "password": "wrong-password"},
+        json={"name": "alice", "password": "wrong-password"},
         headers=headers,
     )
 
@@ -250,9 +253,9 @@ async def test_delete_user_repeat_request_returns_401(
     client: AsyncClient,
     bearer_headers: Callable[..., Awaitable[dict[str, str]]],
 ) -> None:
-    await _create(client, username="alice")
+    await _create(client, name="alice")
     headers = await bearer_headers("alice")
-    body = {"username": "alice", "password": PASSWORD}
+    body = {"name": "alice", "password": PASSWORD}
     first = await client.post(DELETE_URL, json=body, headers=headers)
 
     second = await client.post(DELETE_URL, json=body, headers=headers)
@@ -264,9 +267,9 @@ async def test_delete_user_repeat_request_returns_401(
 @pytest.mark.parametrize(
     "payload",
     [
-        {"username": "alice"},  # password missing
+        {"name": "alice"},  # password missing
         {"password": PASSWORD},  # zero identifiers
-        {"username": "alice", "email": "alice@example.com", "password": PASSWORD},
+        {"name": "alice", "email": "alice@example.com", "password": PASSWORD},
     ],
 )
 async def test_delete_user_invalid_body_returns_422(
@@ -274,7 +277,7 @@ async def test_delete_user_invalid_body_returns_422(
     payload: dict[str, object],
     bearer_headers: Callable[..., Awaitable[dict[str, str]]],
 ) -> None:
-    await _create(client, username="alice")
+    await _create(client, name="alice")
     headers = await bearer_headers("alice")
 
     response = await client.post(DELETE_URL, json=payload, headers=headers)
@@ -305,14 +308,8 @@ async def test_openapi_lists_create_login_and_delete_operations(
     assert set(paths[DELETE_URL]) == {"post"}
 
 
-async def test_create_user_with_birth_date_returns_it(client: AsyncClient) -> None:
-    response = await client.post(USERS_URL, json=_payload(birth_date="1990-05-17"))
-
-    assert response.status_code == 201
-    assert response.json()["birth_date"] == "1990-05-17"
-
-
-async def test_create_user_future_birth_date_returns_422(client: AsyncClient) -> None:
-    response = await client.post(USERS_URL, json=_payload(birth_date="2999-01-01"))
+async def test_create_user_unknown_role_returns_422(client: AsyncClient) -> None:
+    response = await client.post(USERS_URL, json=_payload(role=987654))
 
     assert response.status_code == 422
+    assert response.json()["detail"] == "Unknown role or organization"

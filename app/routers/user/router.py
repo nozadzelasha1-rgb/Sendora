@@ -4,7 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings
 from app.core.db_connector import get_session
 from app.funcs.auth import Auth, RefreshRetryError, RefreshTokenError
-from app.funcs.user import User, UserAlreadyExistsError, UserNotFoundError
+from app.funcs.user import (
+    InvalidReferenceError,
+    User,
+    UserAlreadyExistsError,
+    UserNotFoundError,
+)
 from app.routers.dependencies import get_current_user
 from app.schema.auth import LogoutRequest, RefreshRequest, TokenResponse
 from app.schema.user import UserCreate, UserCredentials, UserRead
@@ -23,10 +28,12 @@ _NO_STORE_HEADERS = {"Cache-Control": "no-store"}
     response_model=UserRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create a user",
-    description="Create a user with a unique username, phone or email.",
+    description="Create a user with a unique name, phone or email.",
     responses={
         status.HTTP_409_CONFLICT: {"description": "User already exists"},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "Validation error"},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Validation error or unknown role or organization"
+        },
     },
 )
 async def create_user(
@@ -40,6 +47,11 @@ async def create_user(
             status_code=status.HTTP_409_CONFLICT,
             detail="User already exists",
         )
+    except InvalidReferenceError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Unknown role or organization",
+        )
     return UserRead.model_validate(user)
 
 
@@ -49,7 +61,7 @@ async def create_user(
     status_code=status.HTTP_200_OK,
     summary="Log in",
     description=(
-        "Check the credentials (password and exactly one of username, phone "
+        "Check the credentials (password and exactly one of name, phone "
         "or email) and return a Bearer access token with the user."
     ),
     responses={
