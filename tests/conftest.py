@@ -7,6 +7,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from tests.seed import seed_references
+
 
 def _test_database_url() -> str:
     """Return TEST_DATABASE_URL, refusing to run against a non-test database."""
@@ -39,5 +41,6 @@ async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
             expire_on_commit=False,
             autoflush=False,
         ) as db_session:
+            await seed_references(db_session)
             yield db_session
         await outer.rollback()

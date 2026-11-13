@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings
 from app.db_entities.users.user import UserDB
 from app.funcs.user_session import parse_refresh_token
+from tests.seed import REF_PAYLOAD
 
 USERS_URL = f"{settings.API_PREFIX}/users"
 LOGIN_URL = f"{USERS_URL}/login"
@@ -24,9 +25,9 @@ WRONG_CREDENTIALS_DETAIL = "Invalid credentials"
 BearerHeaders = Callable[..., Awaitable[dict[str, str]]]
 
 
-async def _create(client: AsyncClient, username: str = "alice") -> dict[str, Any]:
+async def _create(client: AsyncClient, name: str = "alice") -> dict[str, Any]:
     response = await client.post(
-        USERS_URL, json={"username": username, "password": PASSWORD}
+        USERS_URL, json={"name": name, "password": PASSWORD, **REF_PAYLOAD}
     )
     assert response.status_code == 201, response.text
     body: dict[str, Any] = response.json()
@@ -51,7 +52,7 @@ def _crafted_token(user_id: str, sid: str, **overrides: Any) -> str:
     now = datetime.now(UTC)
     claims: dict[str, Any] = {
         "sub": user_id,
-        "username": "alice",
+        "name": "alice",
         "sid": sid,
         "type": "access",
         "iat": now,
@@ -62,17 +63,17 @@ def _crafted_token(user_id: str, sid: str, **overrides: Any) -> str:
     return jwt.encode(claims, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-async def _login_body(client: AsyncClient, username: str = "alice") -> dict[str, Any]:
+async def _login_body(client: AsyncClient, name: str = "alice") -> dict[str, Any]:
     response = await client.post(
-        LOGIN_URL, json={"username": username, "password": PASSWORD}
+        LOGIN_URL, json={"name": name, "password": PASSWORD, **REF_PAYLOAD}
     )
     assert response.status_code == 200, response.text
     body: dict[str, Any] = response.json()
     return body
 
 
-async def _login_token(client: AsyncClient, username: str = "alice") -> str:
-    token: str = (await _login_body(client, username))["access_token"]
+async def _login_token(client: AsyncClient, name: str = "alice") -> str:
+    token: str = (await _login_body(client, name))["access_token"]
     return token
 
 
@@ -94,7 +95,7 @@ async def test_me_with_login_token_returns_200_and_user(
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == created["id"]
-    assert body["username"] == "alice"
+    assert body["name"] == "alice"
     assert "password" not in body
     assert "password_hash" not in body
 
@@ -154,7 +155,7 @@ async def test_me_with_token_of_deleted_user_returns_invalid_401(
     headers = await bearer_headers("alice")
     token = headers["Authorization"].removeprefix("Bearer ")
     deleted = await client.post(
-        DELETE_URL, json={"username": "alice", "password": PASSWORD}, headers=headers
+        DELETE_URL, json={"name": "alice", "password": PASSWORD}, headers=headers
     )
     assert deleted.status_code == 204
 
@@ -170,7 +171,7 @@ async def test_me_with_token_of_inactive_user_returns_invalid_401(
     headers = await bearer_headers("alice")
     user = await session.get(UserDB, uuid.UUID(str(created["id"])))
     assert user is not None
-    user.is_active = False
+    user.active = False
     await session.commit()
 
     response = await client.get(ME_URL, headers=headers)
@@ -187,11 +188,11 @@ async def test_me_failure_bodies_are_byte_identical_for_non_expired_causes(
     token = headers["Authorization"].removeprefix("Bearer ")
     tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
 
-    await _create(client, username="bob")
+    await _create(client, name="bob")
     bob_headers = await bearer_headers("bob")
     user = await session.get(UserDB, uuid.UUID(str(created["id"])))
     assert user is not None
-    user.is_active = False
+    user.active = False
     await session.commit()
 
     responses = [
@@ -216,13 +217,13 @@ async def test_me_failure_bodies_are_byte_identical_for_non_expired_causes(
 async def test_delete_with_other_users_credentials_returns_401_and_keeps_row(
     client: AsyncClient, session: AsyncSession, bearer_headers: BearerHeaders
 ) -> None:
-    alice = await _create(client, username="alice")
-    bob = await _create(client, username="bob")
+    alice = await _create(client, name="alice")
+    bob = await _create(client, name="bob")
     alice_headers = await bearer_headers("alice")
 
     response = await client.post(
         DELETE_URL,
-        json={"username": "bob", "password": PASSWORD},
+        json={"name": "bob", "password": PASSWORD},
         headers=alice_headers,
     )
 
@@ -238,7 +239,7 @@ async def test_delete_without_token_returns_401_and_keeps_row(
     created = await _create(client)
 
     response = await client.post(
-        DELETE_URL, json={"username": "alice", "password": PASSWORD}
+        DELETE_URL, json={"name": "alice", "password": PASSWORD}
     )
 
     _assert_invalid(response)
@@ -252,7 +253,7 @@ async def test_delete_with_invalid_token_returns_401_and_keeps_row(
 
     response = await client.post(
         DELETE_URL,
-        json={"username": "alice", "password": PASSWORD},
+        json={"name": "alice", "password": PASSWORD},
         headers={"Authorization": "Bearer not-a-token"},
     )
 
@@ -265,11 +266,9 @@ async def test_delete_with_invalid_token_returns_401_and_keeps_row(
 
 async def test_create_and_login_work_without_token(client: AsyncClient) -> None:
     created = await client.post(
-        USERS_URL, json={"username": "alice", "password": PASSWORD}
+        USERS_URL, json={"name": "alice", "password": PASSWORD, **REF_PAYLOAD}
     )
-    login = await client.post(
-        LOGIN_URL, json={"username": "alice", "password": PASSWORD}
-    )
+    login = await client.post(LOGIN_URL, json={"name": "alice", "password": PASSWORD})
 
     assert created.status_code == 201
     assert login.status_code == 200
@@ -303,9 +302,9 @@ async def test_openapi_declares_bearer_scheme_and_protects_me_and_delete(
 async def test_me_with_token_of_other_users_session_returns_invalid_401(
     client: AsyncClient,
 ) -> None:
-    alice = await _create(client, username="alice")
-    await _create(client, username="bob")
-    bob_login = await _login_body(client, username="bob")
+    alice = await _create(client, name="alice")
+    await _create(client, name="bob")
+    bob_login = await _login_body(client, name="bob")
     forged = _crafted_token(alice["id"], _sid_of(bob_login["refresh_token"]))
 
     response = await client.get(ME_URL, headers={"Authorization": f"Bearer {forged}"})

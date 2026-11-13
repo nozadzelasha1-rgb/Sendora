@@ -9,7 +9,7 @@ class TokenUser(BaseModel):
     """Identity extracted from a verified access token."""
 
     id: uuid.UUID
-    username: str | None
+    name: str | None
     session_id: uuid.UUID
 
 

@@ -33,11 +33,9 @@ async def client(session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 def bearer_headers(client: AsyncClient) -> Callable[..., Awaitable[dict[str, str]]]:
     """Log in through the API and return an Authorization header for the user."""
 
-    async def _headers(
-        username: str = "alice", password: str = PASSWORD
-    ) -> dict[str, str]:
+    async def _headers(name: str = "alice", password: str = PASSWORD) -> dict[str, str]:
         response = await client.post(
-            LOGIN_URL, json={"username": username, "password": password}
+            LOGIN_URL, json={"name": name, "password": password}
         )
         assert response.status_code == 200, response.text
         token = response.json()["access_token"]

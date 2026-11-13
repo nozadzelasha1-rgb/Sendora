@@ -99,7 +99,7 @@ class UserSession:
                 .where(
                     UserSessionDB.id == sid,
                     UserDB.id == UserSessionDB.user_id,
-                    UserDB.is_active.is_not(False),
+                    UserDB.active.is_not(False),
                     UserSessionDB.refresh_token_hash == presented_hash,
                     UserSessionDB.revoked_at.is_(None),
                     UserSessionDB.expires_at > now,
@@ -141,7 +141,7 @@ class UserSession:
         """
         row = (
             await self.session.execute(
-                select(UserSessionDB, UserDB.is_active)
+                select(UserSessionDB, UserDB.active)
                 .join(UserDB, UserDB.id == UserSessionDB.user_id)
                 .where(UserSessionDB.id == sid)
             )
@@ -149,11 +149,11 @@ class UserSession:
         if row is None:
             await self.session.rollback()
             raise SessionInvalidError("Invalid session")
-        record, is_active = row
+        record, active = row
         if record.revoked_at is not None or record.expires_at <= now:
             await self.session.rollback()
             raise SessionInvalidError("Invalid session")
-        if is_active is False:
+        if active is False:
             await self._revoke_by_id(sid, now, REASON_USER_INACTIVE)
             raise SessionInvalidError("Invalid session")
         previous = record.previous_token_hash
@@ -230,7 +230,7 @@ class UserSession:
             .join(UserSessionDB, UserSessionDB.user_id == UserDB.id)
             .where(
                 UserDB.id == user_id,
-                UserDB.is_active.is_not(False),
+                UserDB.active.is_not(False),
                 UserSessionDB.id == session_id,
                 UserSessionDB.user_id == user_id,
                 UserSessionDB.revoked_at.is_(None),

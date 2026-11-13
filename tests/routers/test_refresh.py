@@ -14,6 +14,7 @@ from app.core import settings
 from app.db_entities.users.user_session import UserSessionDB
 from app.funcs.auth import Auth
 from app.funcs.user_session import parse_refresh_token
+from tests.seed import REF_PAYLOAD
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 USERS_URL = f"{settings.API_PREFIX}/users"
@@ -30,18 +31,18 @@ RETRY_DETAIL = "Refresh in progress, please try again"
 TOKEN_KEYS = {"access_token", "refresh_token", "token_type", "expires_in", "user"}
 
 
-async def _create(client: AsyncClient, username: str = "alice") -> dict[str, Any]:
+async def _create(client: AsyncClient, name: str = "alice") -> dict[str, Any]:
     response = await client.post(
-        USERS_URL, json={"username": username, "password": PASSWORD}
+        USERS_URL, json={"name": name, "password": PASSWORD, **REF_PAYLOAD}
     )
     assert response.status_code == 201, response.text
     body: dict[str, Any] = response.json()
     return body
 
 
-async def _login(client: AsyncClient, username: str = "alice") -> dict[str, Any]:
+async def _login(client: AsyncClient, name: str = "alice") -> dict[str, Any]:
     response = await client.post(
-        LOGIN_URL, json={"username": username, "password": PASSWORD}
+        LOGIN_URL, json={"name": name, "password": PASSWORD, **REF_PAYLOAD}
     )
     assert response.status_code == 200, response.text
     body: dict[str, Any] = response.json()
@@ -74,7 +75,7 @@ def _assert_invalid(response: Response) -> None:
 async def _expire_session(session: AsyncSession, sid: uuid.UUID) -> None:
     await session.execute(
         text(
-            "UPDATE personal.user_sessions "
+            "UPDATE dbo.user_sessions "
             "SET expires_at = now() - interval '1 day' WHERE id = :sid"
         ),
         {"sid": sid},
@@ -100,7 +101,7 @@ async def test_login_returns_refresh_token_in_body_and_no_store_header(
     await _create(client)
 
     response = await client.post(
-        LOGIN_URL, json={"username": "alice", "password": PASSWORD}
+        LOGIN_URL, json={"name": "alice", "password": PASSWORD}
     )
 
     assert response.status_code == 200
@@ -130,7 +131,7 @@ async def test_refresh_rotates_tokens_and_new_access_token_works_on_me(
     assert _sid(body["refresh_token"]) == _sid(login["refresh_token"])
     me = await client.get(ME_URL, headers=_bearer(body["access_token"]))
     assert me.status_code == 200
-    assert me.json()["username"] == "alice"
+    assert me.json()["name"] == "alice"
 
 
 async def test_refresh_replayed_token_after_grace_returns_401_and_kills_session(
@@ -311,11 +312,11 @@ async def test_logout_without_refresh_token_field_returns_422(
 async def test_logout_all_revokes_every_session_of_user_and_spares_others(
     client: AsyncClient,
 ) -> None:
-    await _create(client, username="alice")
-    await _create(client, username="bob")
-    alice_one = await _login(client, username="alice")
-    alice_two = await _login(client, username="alice")
-    bob = await _login(client, username="bob")
+    await _create(client, name="alice")
+    await _create(client, name="bob")
+    alice_one = await _login(client, name="alice")
+    alice_two = await _login(client, name="alice")
+    bob = await _login(client, name="bob")
 
     response = await client.post(
         LOGOUT_ALL_URL, headers=_bearer(alice_one["access_token"])
@@ -354,7 +355,7 @@ async def test_manual_revoke_in_database_blocks_me_immediately(
     await _create(client)
     login = await _login(client)
     await session.execute(
-        text("UPDATE personal.user_sessions SET revoked_at = now() WHERE id = :sid"),
+        text("UPDATE dbo.user_sessions SET revoked_at = now() WHERE id = :sid"),
         {"sid": _sid(login["refresh_token"])},
     )
 
@@ -364,13 +365,13 @@ async def test_manual_revoke_in_database_blocks_me_immediately(
 async def test_delete_with_other_users_credentials_carries_www_authenticate(
     client: AsyncClient,
 ) -> None:
-    await _create(client, username="alice")
-    await _create(client, username="bob")
-    alice = await _login(client, username="alice")
+    await _create(client, name="alice")
+    await _create(client, name="bob")
+    alice = await _login(client, name="alice")
 
     for creds in (
-        {"username": "bob", "password": PASSWORD},
-        {"username": "alice", "password": "wrong-password"},
+        {"name": "bob", "password": PASSWORD},
+        {"name": "alice", "password": "wrong-password"},
     ):
         response = await client.post(
             DELETE_URL, json=creds, headers=_bearer(alice["access_token"])
@@ -389,7 +390,7 @@ async def test_delete_user_cascades_to_sessions_and_refresh_fails(
 
     response = await client.post(
         DELETE_URL,
-        json={"username": "alice", "password": PASSWORD},
+        json={"name": "alice", "password": PASSWORD},
         headers=_bearer(login["access_token"]),
     )
 
