@@ -1,11 +1,16 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import settings
 from app.core.db_connector import get_session
 from app.routers import app
+
+PASSWORD = "password123"
+LOGIN_URL = f"{settings.API_PREFIX}/users/login"
 
 
 @pytest_asyncio.fixture
@@ -22,3 +27,20 @@ async def client(session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
             yield http
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def bearer_headers(client: AsyncClient) -> Callable[..., Awaitable[dict[str, str]]]:
+    """Log in through the API and return an Authorization header for the user."""
+
+    async def _headers(
+        username: str = "alice", password: str = PASSWORD
+    ) -> dict[str, str]:
+        response = await client.post(
+            LOGIN_URL, json={"username": username, "password": password}
+        )
+        assert response.status_code == 200, response.text
+        token = response.json()["access_token"]
+        return {"Authorization": f"Bearer {token}"}
+
+    return _headers

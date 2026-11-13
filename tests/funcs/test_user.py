@@ -391,3 +391,71 @@ async def test_create_persists_birth_date(session: AsyncSession) -> None:
 
     stored = await session.scalar(select(UserDB.birth_date).where(UserDB.id == user.id))
     assert stored == date(1990, 5, 17)
+
+
+# --- delete_user_with_credentials ---------------------------------------------
+
+
+async def test_delete_user_with_credentials_expected_user_removes_row(
+    session: AsyncSession,
+) -> None:
+    user = await _make(session, username="alice")
+    user_id = user.id
+
+    await User(session).delete_user_with_credentials(
+        UserCredentials(username="alice", password=PASSWORD), user_id
+    )
+
+    result = await session.execute(select(UserDB.id).where(UserDB.id == user_id))
+    assert result.scalar_one_or_none() is None
+
+
+async def test_delete_user_with_other_users_credentials_raises_and_deletes_nothing(
+    session: AsyncSession,
+) -> None:
+    alice = await _make(session, username="alice")
+    bob = await _make(session, username="bob")
+    alice_id = alice.id
+    bob_id = bob.id
+
+    with pytest.raises(UserNotFoundError):
+        await User(session).delete_user_with_credentials(
+            UserCredentials(username="bob", password=PASSWORD), alice_id
+        )
+
+    rows = await session.execute(
+        select(UserDB.id).where(UserDB.id.in_([alice_id, bob_id]))
+    )
+    assert set(rows.scalars().all()) == {alice_id, bob_id}
+
+
+async def test_delete_user_with_credentials_wrong_password_raises_and_keeps_row(
+    session: AsyncSession,
+) -> None:
+    user = await _make(session, username="alice")
+    user_id = user.id
+
+    with pytest.raises(UserNotFoundError):
+        await User(session).delete_user_with_credentials(
+            UserCredentials(username="alice", password="wrong-password"), user_id
+        )
+
+    result = await session.execute(select(UserDB.id).where(UserDB.id == user_id))
+    assert result.scalar_one_or_none() == user_id
+
+
+async def test_delete_user_with_credentials_inactive_user_raises_and_keeps_row(
+    session: AsyncSession,
+) -> None:
+    user = await _make(session, username="alice")
+    user_id = user.id
+    user.is_active = False
+    await session.commit()
+
+    with pytest.raises(UserNotFoundError):
+        await User(session).delete_user_with_credentials(
+            UserCredentials(username="alice", password=PASSWORD), user_id
+        )
+
+    result = await session.execute(select(UserDB.id).where(UserDB.id == user_id))
+    assert result.scalar_one_or_none() == user_id

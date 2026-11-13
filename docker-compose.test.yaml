@@ -33,3 +33,6 @@ services:
       POSTGRES_PASSWORD: test
       POSTGRES_DB: sendora_test
       POSTGRES_PORT: "5432"
+      ENVIRONMENT: development
+      # Fake test-only JWT secret (32+ bytes); never use it outside tests.
+      JWT_SECRET_KEY: test-only-fake-jwt-secret-key-0123456789-not-for-real-use
