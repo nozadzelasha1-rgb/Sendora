@@ -434,7 +434,7 @@ async def test_openapi_security_matches_authentication_requirements(
 # --- CORS ---------------------------------------------------------------------
 
 
-def test_main_app_cors_allows_only_get_post_and_declared_headers() -> None:
+def test_main_app_cors_allows_only_declared_methods_and_headers() -> None:
     """Import root main.py in a child process so the shared test app stays untouched."""
     script = (
         "import json\n"
@@ -466,7 +466,7 @@ def test_main_app_cors_allows_only_get_post_and_declared_headers() -> None:
     cors = json.loads(result.stdout.strip().splitlines()[-1])
     assert cors == {
         "origins": settings.CORS_ORIGINS,
-        "methods": ["GET", "POST"],
+        "methods": ["DELETE", "GET", "PATCH", "POST"],
         "headers": ["Authorization", "Content-Type"],
         "credentials": False,
     }

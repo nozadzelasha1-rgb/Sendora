@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.core import settings
+from app.routers.organization import router as organization_router
 from app.routers.user import router as user_router
 
 # @asynccontextmanager
@@ -19,3 +20,4 @@ app = FastAPI(
 )
 
 app.include_router(user_router, prefix=settings.API_PREFIX)
+app.include_router(organization_router, prefix=settings.API_PREFIX)

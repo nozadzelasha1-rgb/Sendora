@@ -6,6 +6,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.utils.constant import ADMIN_OPERATOR_ROLE_ID, SUPER_ADMIN_ROLE_ID
+
 TEST_SPEC_ID = 9001
 TEST_ROLE_ID = 9001
 TEST_ORG_ID = uuid.UUID("00000000-0000-4000-8000-000000009001")
@@ -33,6 +35,18 @@ async def seed_references(session: AsyncSession) -> None:
         ),
         {"id": TEST_ROLE_ID},
     )
+    for role_id, role_name in (
+        (SUPER_ADMIN_ROLE_ID, "super_admin"),
+        (ADMIN_OPERATOR_ROLE_ID, "admin_operator"),
+    ):
+        await session.execute(
+            text(
+                "INSERT INTO dbo.dictionary (id, spec_id, name) "
+                "OVERRIDING SYSTEM VALUE VALUES (:id, :spec, :name) "
+                "ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": role_id, "spec": TEST_SPEC_ID, "name": role_name},
+        )
     await session.execute(
         text(
             "INSERT INTO dbo.organizations (id, name, type) "
@@ -40,3 +54,5 @@ async def seed_references(session: AsyncSession) -> None:
         ),
         {"org_id": TEST_ORG_ID, "type_id": TEST_ROLE_ID},
     )
+    # Commit (releases the savepoint) so a rollback inside a test keeps the seed.
+    await session.commit()
