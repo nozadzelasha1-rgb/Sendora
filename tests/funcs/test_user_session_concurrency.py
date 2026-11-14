@@ -16,6 +16,7 @@ from app.funcs.user_session import (
     UserSession,
 )
 from app.schema.user import UserCreate
+from tests.seed import TEST_ORG_ID, TEST_ROLE_ID, seed_references
 
 PASSWORD = "password123"
 NOW = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
@@ -29,10 +30,18 @@ async def committed_session(
 
     Deleting the user cascades to user_sessions, so nothing leaks into other tests.
     """
-    username = f"race_{uuid.uuid4().hex[:16]}"
+    name = f"race_{uuid.uuid4().hex[:16]}"
+    async with AsyncSession(engine, expire_on_commit=False) as seed_db:
+        await seed_references(seed_db)
+        await seed_db.commit()
     async with AsyncSession(engine, expire_on_commit=False) as setup:
         user = await User(setup).create(
-            UserCreate(username=username, password=PASSWORD)
+            UserCreate(
+                role=TEST_ROLE_ID,
+                organization_id=TEST_ORG_ID,
+                name=name,
+                password=PASSWORD,
+            )
         )
         user_id = user.id
         row, token = await UserSession(setup).create(user_id, NOW)

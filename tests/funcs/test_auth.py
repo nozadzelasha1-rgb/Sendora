@@ -23,13 +23,18 @@ from app.funcs.auth import (
 from app.funcs.user import User, UserNotFoundError
 from app.funcs.user_session import UserSession, parse_refresh_token
 from app.schema.user import UserCreate, UserCredentials
+from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
 PASSWORD = "password123"
-CLAIM_KEYS = {"sub", "username", "sid", "type", "iat", "exp", "jti"}
+CLAIM_KEYS = {"sub", "name", "sid", "type", "iat", "exp", "jti"}
 
 
-async def _make(session: AsyncSession, username: str = "alice") -> UserDB:
-    return await User(session).create(UserCreate(username=username, password=PASSWORD))
+async def _make(session: AsyncSession, name: str = "alice") -> UserDB:
+    return await User(session).create(
+        UserCreate(
+            role=TEST_ROLE_ID, organization_id=TEST_ORG_ID, name=name, password=PASSWORD
+        )
+    )
 
 
 async def _session(
@@ -54,7 +59,7 @@ def _claims(user_id: str | None = None, **overrides: Any) -> dict[str, Any]:
     now = datetime.now(UTC)
     claims: dict[str, Any] = {
         "sub": user_id or str(uuid.uuid4()),
-        "username": "alice",
+        "name": "alice",
         "sid": str(uuid.uuid4()),
         "type": ACCESS_TOKEN_TYPE,
         "iat": now,
@@ -83,7 +88,7 @@ async def test_create_access_token_decodes_to_user_identity(
     identity = Auth.decode_token(token)
 
     assert identity.id == user.id
-    assert identity.username == "alice"
+    assert identity.name == "alice"
     assert identity.session_id == sid
 
 
@@ -110,7 +115,9 @@ async def test_create_access_token_exposes_no_secret_or_personal_data(
 ) -> None:
     user = await User(session).create(
         UserCreate(
-            username="alice",
+            role=TEST_ROLE_ID,
+            organization_id=TEST_ORG_ID,
+            name="alice",
             password=PASSWORD,
             phone="+79991234567",
             email="alice@example.com",
@@ -212,7 +219,7 @@ def test_decode_token_bad_signature_raises_invalid_token_error() -> None:
 def test_decode_token_tampered_payload_raises_invalid_token_error() -> None:
     header, _payload, signature = _sign(_claims()).split(".")
     forged_json = (
-        b'{"sub":"00000000-0000-0000-0000-000000000001","username":"x",'
+        b'{"sub":"00000000-0000-0000-0000-000000000001","name":"x",'
         b'"sid":"00000000-0000-0000-0000-000000000002",'
         b'"type":"access","iat":1,"exp":9999999999}'
     )
@@ -283,12 +290,12 @@ def test_decode_token_non_uuid_sid_raises_invalid_token_error(bad_sid: Any) -> N
         Auth.decode_token(_sign(_claims(sid=bad_sid)))
 
 
-@pytest.mark.parametrize("bad_username", [123, ["alice"], {"name": "alice"}, True])
-def test_decode_token_non_string_username_raises_invalid_token_error(
-    bad_username: Any,
+@pytest.mark.parametrize("bad_name", [123, ["alice"], {"name": "alice"}, True])
+def test_decode_token_non_string_name_raises_invalid_token_error(
+    bad_name: Any,
 ) -> None:
     with pytest.raises(InvalidTokenError):
-        Auth.decode_token(_sign(_claims(username=bad_username)))
+        Auth.decode_token(_sign(_claims(name=bad_name)))
 
 
 # --- is_token_valid -----------------------------------------------------------
@@ -337,7 +344,7 @@ async def test_get_user_from_token_inactive_user_raises_invalid_token(
     user = await _make(session)
     sid, _ = await _session(session, user)
     token = Auth.create_access_token(user, sid)
-    user.is_active = False
+    user.active = False
     await session.commit()
 
     with pytest.raises(InvalidTokenError):
@@ -404,8 +411,8 @@ async def test_get_user_from_token_unknown_session_raises_invalid_token(
 async def test_get_user_from_token_session_of_other_user_raises_invalid_token(
     session: AsyncSession,
 ) -> None:
-    alice = await _make(session, username="alice")
-    bob = await _make(session, username="bob")
+    alice = await _make(session, name="alice")
+    bob = await _make(session, name="bob")
     bob_sid, _ = await _session(session, bob)
     token = Auth.create_access_token(alice, bob_sid)
 
@@ -421,9 +428,7 @@ async def test_login_valid_credentials_returns_login_result(
 ) -> None:
     created = await _make(session)
 
-    result = await Auth(session).login(
-        UserCredentials(username="alice", password=PASSWORD)
-    )
+    result = await Auth(session).login(UserCredentials(name="alice", password=PASSWORD))
 
     assert isinstance(result, LoginResult)
     assert result.user.id == created.id
@@ -437,8 +442,8 @@ async def test_login_creates_one_session_per_call(session: AsyncSession) -> None
     created = await _make(session)
     auth = Auth(session)
 
-    first = await auth.login(UserCredentials(username="alice", password=PASSWORD))
-    second = await auth.login(UserCredentials(username="alice", password=PASSWORD))
+    first = await auth.login(UserCredentials(name="alice", password=PASSWORD))
+    second = await auth.login(UserCredentials(name="alice", password=PASSWORD))
 
     assert first.refresh_token != second.refresh_token
     assert await _session_count(session, created.id) == 2
@@ -451,7 +456,7 @@ async def test_login_wrong_password_raises_user_not_found_and_creates_no_session
 
     with pytest.raises(UserNotFoundError):
         await Auth(session).login(
-            UserCredentials(username="alice", password="wrong-password")
+            UserCredentials(name="alice", password="wrong-password")
         )
 
     assert await _session_count(session, created.id) == 0
@@ -459,7 +464,7 @@ async def test_login_wrong_password_raises_user_not_found_and_creates_no_session
 
 async def test_login_unknown_user_raises_user_not_found(session: AsyncSession) -> None:
     with pytest.raises(UserNotFoundError):
-        await Auth(session).login(UserCredentials(username="nobody", password=PASSWORD))
+        await Auth(session).login(UserCredentials(name="nobody", password=PASSWORD))
 
 
 # --- refresh ------------------------------------------------------------------
@@ -469,9 +474,7 @@ async def test_refresh_rotates_and_returns_access_for_same_session(
     session: AsyncSession,
 ) -> None:
     created = await _make(session)
-    login = await Auth(session).login(
-        UserCredentials(username="alice", password=PASSWORD)
-    )
+    login = await Auth(session).login(UserCredentials(name="alice", password=PASSWORD))
 
     result = await Auth(session).refresh(login.refresh_token)
 
@@ -493,9 +496,7 @@ async def test_refresh_revoked_token_raises_refresh_token_error(
     session: AsyncSession,
 ) -> None:
     await _make(session)
-    login = await Auth(session).login(
-        UserCredentials(username="alice", password=PASSWORD)
-    )
+    login = await Auth(session).login(UserCredentials(name="alice", password=PASSWORD))
     await Auth(session).logout(login.refresh_token)
 
     with pytest.raises(RefreshTokenError):
@@ -506,9 +507,7 @@ async def test_refresh_parallel_retry_inside_grace_raises_retry_error(
     session: AsyncSession,
 ) -> None:
     await _make(session)
-    login = await Auth(session).login(
-        UserCredentials(username="alice", password=PASSWORD)
-    )
+    login = await Auth(session).login(UserCredentials(name="alice", password=PASSWORD))
     await Auth(session).refresh(login.refresh_token)
 
     with pytest.raises(RefreshRetryError):
@@ -519,9 +518,7 @@ async def test_refresh_reuse_after_grace_raises_refresh_token_error(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _make(session)
-    login = await Auth(session).login(
-        UserCredentials(username="alice", password=PASSWORD)
-    )
+    login = await Auth(session).login(UserCredentials(name="alice", password=PASSWORD))
     await Auth(session).refresh(login.refresh_token)
     monkeypatch.setattr(settings, "REFRESH_TOKEN_REUSE_GRACE_SECONDS", 0)
 
@@ -533,9 +530,7 @@ async def test_refresh_random_secret_raises_and_keeps_session_usable(
     session: AsyncSession,
 ) -> None:
     await _make(session)
-    login = await Auth(session).login(
-        UserCredentials(username="alice", password=PASSWORD)
-    )
+    login = await Auth(session).login(UserCredentials(name="alice", password=PASSWORD))
     sid = parse_refresh_token(login.refresh_token)[0]
 
     with pytest.raises(RefreshTokenError):
@@ -550,9 +545,7 @@ async def test_refresh_random_secret_raises_and_keeps_session_usable(
 
 async def test_logout_revokes_session_of_refresh_token(session: AsyncSession) -> None:
     await _make(session)
-    login = await Auth(session).login(
-        UserCredentials(username="alice", password=PASSWORD)
-    )
+    login = await Auth(session).login(UserCredentials(name="alice", password=PASSWORD))
 
     await Auth(session).logout(login.refresh_token)
 
@@ -571,12 +564,12 @@ async def test_logout_bad_token_never_raises(session: AsyncSession, token: str) 
 async def test_logout_all_revokes_every_session_and_returns_count(
     session: AsyncSession,
 ) -> None:
-    alice = await _make(session, username="alice")
-    bob = await _make(session, username="bob")
+    alice = await _make(session, name="alice")
+    bob = await _make(session, name="bob")
     auth = Auth(session)
-    alice_one = await auth.login(UserCredentials(username="alice", password=PASSWORD))
-    alice_two = await auth.login(UserCredentials(username="alice", password=PASSWORD))
-    bob_login = await auth.login(UserCredentials(username="bob", password=PASSWORD))
+    alice_one = await auth.login(UserCredentials(name="alice", password=PASSWORD))
+    alice_two = await auth.login(UserCredentials(name="alice", password=PASSWORD))
+    bob_login = await auth.login(UserCredentials(name="bob", password=PASSWORD))
 
     count = await auth.logout_all(alice.id)
 

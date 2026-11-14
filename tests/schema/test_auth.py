@@ -1,67 +1,67 @@
 import uuid
-from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
 
 from app.schema.auth import LogoutRequest, RefreshRequest, TokenResponse, TokenUser
 from app.schema.user import UserRead
+from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
 
 def _user_read() -> UserRead:
     return UserRead(
         id=uuid.uuid4(),
-        username="alice",
+        name="alice",
+        role=TEST_ROLE_ID,
+        organization_id=TEST_ORG_ID,
+        zone_id=None,
+        active=True,
         phone=None,
         email="alice@example.com",
-        birth_date=None,
-        is_active=True,
-        created_at=datetime(2026, 1, 1, tzinfo=UTC),
-        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
 
 # --- TokenUser ----------------------------------------------------------------
 
 
-def test_token_user_accepts_uuid_username_and_session_id() -> None:
+def test_token_user_accepts_uuid_name_and_session_id() -> None:
     user_id = uuid.uuid4()
     session_id = uuid.uuid4()
 
-    token_user = TokenUser(id=user_id, username="alice", session_id=session_id)
+    token_user = TokenUser(id=user_id, name="alice", session_id=session_id)
 
     assert token_user.id == user_id
-    assert token_user.username == "alice"
+    assert token_user.name == "alice"
     assert token_user.session_id == session_id
 
 
-def test_token_user_accepts_none_username() -> None:
-    token_user = TokenUser(id=uuid.uuid4(), username=None, session_id=uuid.uuid4())
+def test_token_user_accepts_none_name() -> None:
+    token_user = TokenUser(id=uuid.uuid4(), name=None, session_id=uuid.uuid4())
 
-    assert token_user.username is None
+    assert token_user.name is None
 
 
-def test_token_user_dump_exposes_only_id_username_and_session_id() -> None:
+def test_token_user_dump_exposes_only_id_name_and_session_id() -> None:
     dumped = TokenUser(
-        id=uuid.uuid4(), username="alice", session_id=uuid.uuid4()
+        id=uuid.uuid4(), name="alice", session_id=uuid.uuid4()
     ).model_dump()
 
-    assert set(dumped) == {"id", "username", "session_id"}
+    assert set(dumped) == {"id", "name", "session_id"}
 
 
 def test_token_user_invalid_id_raises_validation_error() -> None:
     with pytest.raises(ValidationError):
-        TokenUser(id="not-a-uuid", username="alice", session_id=uuid.uuid4())
+        TokenUser(id="not-a-uuid", name="alice", session_id=uuid.uuid4())
 
 
 def test_token_user_invalid_session_id_raises_validation_error() -> None:
     with pytest.raises(ValidationError):
-        TokenUser(id=uuid.uuid4(), username="alice", session_id="not-a-uuid")
+        TokenUser(id=uuid.uuid4(), name="alice", session_id="not-a-uuid")
 
 
 def test_token_user_missing_session_id_raises_validation_error() -> None:
     with pytest.raises(ValidationError):
-        TokenUser(id=uuid.uuid4(), username="alice")  # type: ignore[call-arg]
+        TokenUser(id=uuid.uuid4(), name="alice")  # type: ignore[call-arg]
 
 
 # --- TokenResponse ------------------------------------------------------------

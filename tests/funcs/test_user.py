@@ -1,5 +1,4 @@
 import uuid
-from datetime import date
 from typing import Any
 
 import pytest
@@ -8,21 +7,34 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db_entities.users.user import UserDB
-from app.funcs.user import User, UserAlreadyExistsError, UserNotFoundError
+from app.funcs.user import (
+    InvalidReferenceError,
+    User,
+    UserAlreadyExistsError,
+    UserNotFoundError,
+)
 from app.schema.user import UserCreate, UserCredentials
+from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
 PASSWORD = "password123"
 
 
 async def _make(
     session: AsyncSession,
-    username: str = "alice",
+    name: str = "alice",
     password: str = PASSWORD,
     phone: str | None = None,
     email: str | None = None,
 ) -> UserDB:
     return await User(session).create(
-        UserCreate(username=username, password=password, phone=phone, email=email)
+        UserCreate(
+            role=TEST_ROLE_ID,
+            organization_id=TEST_ORG_ID,
+            name=name,
+            password=password,
+            phone=phone,
+            email=email,
+        )
     )
 
 
@@ -69,7 +81,9 @@ async def test_create_stores_argon2_hash_not_plaintext(session: AsyncSession) ->
 async def test_create_persists_normalized_fields(session: AsyncSession) -> None:
     user = await User(session).create(
         UserCreate(
-            username="  Alice_01 ",
+            role=TEST_ROLE_ID,
+            organization_id=TEST_ORG_ID,
+            name="  Alice_01 ",
             password=PASSWORD,
             phone=" +79991234567 ",
             email=" Alice@Example.COM ",
@@ -77,49 +91,49 @@ async def test_create_persists_normalized_fields(session: AsyncSession) -> None:
     )
 
     assert user.id is not None
-    assert user.username == "alice_01"
+    assert user.name == "alice_01"
     assert user.phone == "+79991234567"
     assert user.email == "alice@example.com"
 
 
-async def test_create_duplicate_username_raises_already_exists(
+async def test_create_duplicate_name_raises_already_exists(
     session: AsyncSession,
 ) -> None:
-    await _make(session, username="alice")
+    await _make(session, name="alice")
 
     with pytest.raises(UserAlreadyExistsError):
-        await _make(session, username="alice", phone="+79990000001")
+        await _make(session, name="alice", phone="+79990000001")
 
 
 async def test_create_duplicate_phone_raises_already_exists(
     session: AsyncSession,
 ) -> None:
-    await _make(session, username="alice", phone="+79991234567")
+    await _make(session, name="alice", phone="+79991234567")
 
     with pytest.raises(UserAlreadyExistsError):
-        await _make(session, username="bob", phone="+79991234567")
+        await _make(session, name="bob", phone="+79991234567")
 
 
 async def test_create_duplicate_email_raises_already_exists(
     session: AsyncSession,
 ) -> None:
-    await _make(session, username="alice", email="alice@example.com")
+    await _make(session, name="alice", email="alice@example.com")
 
     with pytest.raises(UserAlreadyExistsError):
-        await _make(session, username="bob", email="alice@example.com")
+        await _make(session, name="bob", email="alice@example.com")
 
 
-async def test_create_duplicate_username_differing_case_raises_already_exists(
+async def test_create_duplicate_name_differing_case_raises_already_exists(
     session: AsyncSession,
 ) -> None:
-    await _make(session, username="alice")
+    await _make(session, name="alice")
 
     with pytest.raises(UserAlreadyExistsError):
-        await _make(session, username="ALICE")
+        await _make(session, name="ALICE")
 
 
 async def test_create_without_phone_and_email_succeeds(session: AsyncSession) -> None:
-    user = await _make(session, username="alice")
+    user = await _make(session, name="alice")
 
     assert user.phone is None
     assert user.email is None
@@ -128,8 +142,8 @@ async def test_create_without_phone_and_email_succeeds(session: AsyncSession) ->
 async def test_create_several_users_without_phone_or_email_allowed(
     session: AsyncSession,
 ) -> None:
-    first = await _make(session, username="alice")
-    second = await _make(session, username="bob")
+    first = await _make(session, name="alice")
+    second = await _make(session, name="bob")
 
     assert first.id != second.id
     assert first.phone is None and second.phone is None
@@ -140,7 +154,7 @@ async def test_create_integrity_error_maps_to_already_exists(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Simulate a race: the pre-check misses a row that the UNIQUE constraint rejects."""
-    await _make(session, username="racer", email="racer@example.com")
+    await _make(session, name="racer", email="racer@example.com")
 
     class _NoRowsResult:
         def first(self) -> None:
@@ -156,7 +170,7 @@ async def test_create_integrity_error_maps_to_already_exists(
     monkeypatch.setattr(session, "execute", _skip_precheck)
 
     with pytest.raises(UserAlreadyExistsError) as exc_info:
-        await _make(session, username="racer", password=PASSWORD)
+        await _make(session, name="racer", password=PASSWORD)
 
     assert isinstance(exc_info.value.__cause__, IntegrityError)
 
@@ -164,20 +178,20 @@ async def test_create_integrity_error_maps_to_already_exists(
 # --- get_by_credentials / check_credentials -----------------------------------
 
 
-async def test_get_by_credentials_by_username_returns_user(
+async def test_get_by_credentials_by_name_returns_user(
     session: AsyncSession,
 ) -> None:
-    created = await _make(session, username="alice")
+    created = await _make(session, name="alice")
 
     found = await User(session).get_by_credentials(
-        UserCredentials(username="alice", password=PASSWORD)
+        UserCredentials(name="alice", password=PASSWORD)
     )
 
     assert found.id == created.id
 
 
 async def test_get_by_credentials_by_phone_returns_user(session: AsyncSession) -> None:
-    created = await _make(session, username="alice", phone="+79991234567")
+    created = await _make(session, name="alice", phone="+79991234567")
 
     found = await User(session).get_by_credentials(
         UserCredentials(phone="+79991234567", password=PASSWORD)
@@ -187,7 +201,7 @@ async def test_get_by_credentials_by_phone_returns_user(session: AsyncSession) -
 
 
 async def test_get_by_credentials_by_email_returns_user(session: AsyncSession) -> None:
-    created = await _make(session, username="alice", email="alice@example.com")
+    created = await _make(session, name="alice", email="alice@example.com")
 
     found = await User(session).get_by_credentials(
         UserCredentials(email="alice@example.com", password=PASSWORD)
@@ -199,11 +213,11 @@ async def test_get_by_credentials_by_email_returns_user(session: AsyncSession) -
 async def test_get_by_credentials_wrong_password_raises_not_found(
     session: AsyncSession,
 ) -> None:
-    await _make(session, username="alice")
+    await _make(session, name="alice")
 
     with pytest.raises(UserNotFoundError):
         await User(session).get_by_credentials(
-            UserCredentials(username="alice", password="wrong-password")
+            UserCredentials(name="alice", password="wrong-password")
         )
 
 
@@ -212,37 +226,37 @@ async def test_get_by_credentials_unknown_user_raises_not_found(
 ) -> None:
     with pytest.raises(UserNotFoundError):
         await User(session).get_by_credentials(
-            UserCredentials(username="nobody", password=PASSWORD)
+            UserCredentials(name="nobody", password=PASSWORD)
         )
 
 
 async def test_get_by_credentials_inactive_user_raises_not_found(
     session: AsyncSession,
 ) -> None:
-    user = await _make(session, username="alice")
-    user.is_active = False
+    user = await _make(session, name="alice")
+    user.active = False
     await session.commit()
 
     with pytest.raises(UserNotFoundError):
         await User(session).get_by_credentials(
-            UserCredentials(username="alice", password=PASSWORD)
+            UserCredentials(name="alice", password=PASSWORD)
         )
 
 
-async def test_get_by_credentials_username_case_insensitive(
+async def test_get_by_credentials_name_case_insensitive(
     session: AsyncSession,
 ) -> None:
-    created = await _make(session, username="alice")
+    created = await _make(session, name="alice")
 
     found = await User(session).get_by_credentials(
-        UserCredentials(username="  ALICE ", password=PASSWORD)
+        UserCredentials(name="  ALICE ", password=PASSWORD)
     )
 
     assert found.id == created.id
 
 
 async def test_get_by_credentials_email_case_insensitive(session: AsyncSession) -> None:
-    created = await _make(session, username="alice", email="alice@example.com")
+    created = await _make(session, name="alice", email="alice@example.com")
 
     found = await User(session).get_by_credentials(
         UserCredentials(email="ALICE@Example.COM", password=PASSWORD)
@@ -252,10 +266,10 @@ async def test_get_by_credentials_email_case_insensitive(session: AsyncSession) 
 
 
 async def test_check_credentials_valid_returns_true(session: AsyncSession) -> None:
-    await _make(session, username="alice")
+    await _make(session, name="alice")
 
     result = await User(session).check_credentials(
-        UserCredentials(username="alice", password=PASSWORD)
+        UserCredentials(name="alice", password=PASSWORD)
     )
 
     assert result is True
@@ -264,11 +278,11 @@ async def test_check_credentials_valid_returns_true(session: AsyncSession) -> No
 async def test_check_credentials_wrong_password_raises_not_found(
     session: AsyncSession,
 ) -> None:
-    await _make(session, username="alice")
+    await _make(session, name="alice")
 
     with pytest.raises(UserNotFoundError):
         await User(session).check_credentials(
-            UserCredentials(username="alice", password="wrong-password")
+            UserCredentials(name="alice", password="wrong-password")
         )
 
 
@@ -277,20 +291,20 @@ async def test_check_credentials_unknown_user_raises_not_found(
 ) -> None:
     with pytest.raises(UserNotFoundError):
         await User(session).check_credentials(
-            UserCredentials(username="nobody", password=PASSWORD)
+            UserCredentials(name="nobody", password=PASSWORD)
         )
 
 
 async def test_check_credentials_inactive_user_raises_not_found(
     session: AsyncSession,
 ) -> None:
-    user = await _make(session, username="alice")
-    user.is_active = False
+    user = await _make(session, name="alice")
+    user.active = False
     await session.commit()
 
     with pytest.raises(UserNotFoundError):
         await User(session).check_credentials(
-            UserCredentials(username="alice", password=PASSWORD)
+            UserCredentials(name="alice", password=PASSWORD)
         )
 
 
@@ -298,13 +312,13 @@ async def test_check_credentials_inactive_user_raises_not_found(
 
 
 async def test_delete_existing_user_removes_row(session: AsyncSession) -> None:
-    user = await _make(session, username="alice")
+    user = await _make(session, name="alice")
 
     await User(session).delete(user.id)
 
     with pytest.raises(UserNotFoundError):
         await User(session).get_by_credentials(
-            UserCredentials(username="alice", password=PASSWORD)
+            UserCredentials(name="alice", password=PASSWORD)
         )
 
 
@@ -316,9 +330,9 @@ async def test_delete_missing_user_raises_not_found(session: AsyncSession) -> No
 async def test_delete_inactive_user_raises_not_found_and_keeps_row(
     session: AsyncSession,
 ) -> None:
-    user = await _make(session, username="alice")
+    user = await _make(session, name="alice")
     user_id = user.id
-    user.is_active = False
+    user.active = False
     await session.commit()
 
     with pytest.raises(UserNotFoundError):
@@ -332,11 +346,11 @@ async def test_delete_inactive_user_raises_not_found_and_keeps_row(
 
 
 async def test_delete_with_credentials_valid_removes_row(session: AsyncSession) -> None:
-    user = await _make(session, username="alice")
+    user = await _make(session, name="alice")
     user_id = user.id
 
     await User(session).delete_with_credentials(
-        UserCredentials(username="alice", password=PASSWORD)
+        UserCredentials(name="alice", password=PASSWORD)
     )
 
     result = await session.execute(select(UserDB.id).where(UserDB.id == user_id))
@@ -346,12 +360,12 @@ async def test_delete_with_credentials_valid_removes_row(session: AsyncSession) 
 async def test_delete_with_credentials_wrong_password_raises_and_keeps_row(
     session: AsyncSession,
 ) -> None:
-    user = await _make(session, username="alice")
+    user = await _make(session, name="alice")
     user_id = user.id
 
     with pytest.raises(UserNotFoundError):
         await User(session).delete_with_credentials(
-            UserCredentials(username="alice", password="wrong-password")
+            UserCredentials(name="alice", password="wrong-password")
         )
 
     result = await session.execute(select(UserDB.id).where(UserDB.id == user_id))
@@ -363,34 +377,25 @@ async def test_delete_with_credentials_unknown_user_raises_not_found(
 ) -> None:
     with pytest.raises(UserNotFoundError):
         await User(session).delete_with_credentials(
-            UserCredentials(username="nobody", password=PASSWORD)
+            UserCredentials(name="nobody", password=PASSWORD)
         )
 
 
 async def test_delete_with_credentials_inactive_user_raises_and_keeps_row(
     session: AsyncSession,
 ) -> None:
-    user = await _make(session, username="alice")
+    user = await _make(session, name="alice")
     user_id = user.id
-    user.is_active = False
+    user.active = False
     await session.commit()
 
     with pytest.raises(UserNotFoundError):
         await User(session).delete_with_credentials(
-            UserCredentials(username="alice", password=PASSWORD)
+            UserCredentials(name="alice", password=PASSWORD)
         )
 
     result = await session.execute(select(UserDB.id).where(UserDB.id == user_id))
     assert result.scalar_one_or_none() == user_id
-
-
-async def test_create_persists_birth_date(session: AsyncSession) -> None:
-    user = await User(session).create(
-        UserCreate(username="alice", password=PASSWORD, birth_date=date(1990, 5, 17))
-    )
-
-    stored = await session.scalar(select(UserDB.birth_date).where(UserDB.id == user.id))
-    assert stored == date(1990, 5, 17)
 
 
 # --- delete_user_with_credentials ---------------------------------------------
@@ -399,11 +404,11 @@ async def test_create_persists_birth_date(session: AsyncSession) -> None:
 async def test_delete_user_with_credentials_expected_user_removes_row(
     session: AsyncSession,
 ) -> None:
-    user = await _make(session, username="alice")
+    user = await _make(session, name="alice")
     user_id = user.id
 
     await User(session).delete_user_with_credentials(
-        UserCredentials(username="alice", password=PASSWORD), user_id
+        UserCredentials(name="alice", password=PASSWORD), user_id
     )
 
     result = await session.execute(select(UserDB.id).where(UserDB.id == user_id))
@@ -413,14 +418,14 @@ async def test_delete_user_with_credentials_expected_user_removes_row(
 async def test_delete_user_with_other_users_credentials_raises_and_deletes_nothing(
     session: AsyncSession,
 ) -> None:
-    alice = await _make(session, username="alice")
-    bob = await _make(session, username="bob")
+    alice = await _make(session, name="alice")
+    bob = await _make(session, name="bob")
     alice_id = alice.id
     bob_id = bob.id
 
     with pytest.raises(UserNotFoundError):
         await User(session).delete_user_with_credentials(
-            UserCredentials(username="bob", password=PASSWORD), alice_id
+            UserCredentials(name="bob", password=PASSWORD), alice_id
         )
 
     rows = await session.execute(
@@ -432,12 +437,12 @@ async def test_delete_user_with_other_users_credentials_raises_and_deletes_nothi
 async def test_delete_user_with_credentials_wrong_password_raises_and_keeps_row(
     session: AsyncSession,
 ) -> None:
-    user = await _make(session, username="alice")
+    user = await _make(session, name="alice")
     user_id = user.id
 
     with pytest.raises(UserNotFoundError):
         await User(session).delete_user_with_credentials(
-            UserCredentials(username="alice", password="wrong-password"), user_id
+            UserCredentials(name="alice", password="wrong-password"), user_id
         )
 
     result = await session.execute(select(UserDB.id).where(UserDB.id == user_id))
@@ -447,15 +452,29 @@ async def test_delete_user_with_credentials_wrong_password_raises_and_keeps_row(
 async def test_delete_user_with_credentials_inactive_user_raises_and_keeps_row(
     session: AsyncSession,
 ) -> None:
-    user = await _make(session, username="alice")
+    user = await _make(session, name="alice")
     user_id = user.id
-    user.is_active = False
+    user.active = False
     await session.commit()
 
     with pytest.raises(UserNotFoundError):
         await User(session).delete_user_with_credentials(
-            UserCredentials(username="alice", password=PASSWORD), user_id
+            UserCredentials(name="alice", password=PASSWORD), user_id
         )
 
     result = await session.execute(select(UserDB.id).where(UserDB.id == user_id))
     assert result.scalar_one_or_none() == user_id
+
+
+async def test_create_unknown_role_raises_invalid_reference_error(
+    session: AsyncSession,
+) -> None:
+    with pytest.raises(InvalidReferenceError):
+        await User(session).create(
+            UserCreate(
+                role=987654,
+                organization_id=TEST_ORG_ID,
+                name="alice",
+                password=PASSWORD,
+            )
+        )

@@ -14,10 +14,16 @@ from app.schema.user import UserCreate, UserCredentials
 _password_hash = PasswordHash.recommended()
 # Verified against when no user is found, so timing does not reveal existence.
 _DUMMY_HASH: str = _password_hash.hash("dummy-password-for-timing")
+_SQLSTATE_UNIQUE_VIOLATION = "23505"
+_SQLSTATE_FOREIGN_KEY_VIOLATION = "23503"
 
 
 class UserAlreadyExistsError(Exception):
-    """A user with the same username, phone or email already exists."""
+    """A user with the same name, phone or email already exists."""
+
+
+class InvalidReferenceError(Exception):
+    """The role or organization referenced by the user does not exist."""
 
 
 class UserNotFoundError(Exception):
@@ -44,8 +50,12 @@ class User:
             return False
 
     async def create(self, data: UserCreate) -> UserDB:
-        """Create a user; raise UserAlreadyExistsError on a duplicate identifier."""
-        conditions: list[ColumnElement[bool]] = [UserDB.username == data.username]
+        """Create a user.
+
+        Raise UserAlreadyExistsError on a duplicate identifier and
+        InvalidReferenceError when the role or organization does not exist.
+        """
+        conditions: list[ColumnElement[bool]] = [UserDB.name == data.name]
         if data.phone is not None:
             conditions.append(UserDB.phone == data.phone)
         if data.email is not None:
@@ -57,10 +67,12 @@ class User:
             raise UserAlreadyExistsError("User already exists")
 
         user = UserDB(
-            username=data.username,
+            name=data.name,
+            role=data.role,
+            organization_id=data.organization_id,
+            zone_id=data.zone_id,
             phone=data.phone,
             email=data.email,
-            birth_date=data.birth_date,
             password_hash=await self.hash_password(data.password.get_secret_value()),
         )
         self.session.add(user)
@@ -68,7 +80,12 @@ class User:
             await self.session.commit()
         except IntegrityError as exc:
             await self.session.rollback()
-            raise UserAlreadyExistsError("User already exists") from exc
+            sqlstate = getattr(exc.orig, "sqlstate", None)
+            if sqlstate == _SQLSTATE_UNIQUE_VIOLATION:
+                raise UserAlreadyExistsError("User already exists") from exc
+            if sqlstate == _SQLSTATE_FOREIGN_KEY_VIOLATION:
+                raise InvalidReferenceError("Unknown role or organization") from exc
+            raise
         except SQLAlchemyError:
             await self.session.rollback()
             raise
@@ -76,8 +93,8 @@ class User:
 
     async def get_by_credentials(self, creds: UserCredentials) -> UserDB:
         """Return the active user matching the credentials or raise UserNotFoundError."""
-        if creds.username is not None:
-            column = UserDB.username == creds.username
+        if creds.name is not None:
+            column = UserDB.name == creds.name
         elif creds.phone is not None:
             column = UserDB.phone == creds.phone
         elif creds.email is not None:
@@ -91,9 +108,11 @@ class User:
         # Always run exactly one verification to equalise timing.
         password_ok = await self.verify_password(
             creds.password.get_secret_value(),
-            user.password_hash if user is not None else _DUMMY_HASH,
+            user.password_hash
+            if user is not None and user.password_hash is not None
+            else _DUMMY_HASH,
         )
-        if user is None or user.is_active is False or not password_ok:
+        if user is None or user.active is False or not password_ok:
             raise UserNotFoundError("Invalid credentials")
         return user
 
@@ -125,7 +144,7 @@ class User:
         try:
             result = await self.session.execute(
                 delete(UserDB)
-                .where(UserDB.id == user_id, UserDB.is_active.is_not(False))
+                .where(UserDB.id == user_id, UserDB.active.is_not(False))
                 .returning(UserDB.id)
             )
             deleted = result.first()

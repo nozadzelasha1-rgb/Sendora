@@ -1,6 +1,5 @@
 import uuid
 from datetime import datetime
-from typing import ClassVar
 
 from sqlalchemy import UUID, DateTime, ForeignKey, LargeBinary, String, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -10,7 +9,6 @@ from app.db_entities.base import Base
 
 class UserSessionDB(Base):
     __tablename__ = "user_sessions"
-    __table_args__: ClassVar[dict[str, str]] = {"schema": "personal"}
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -20,10 +18,10 @@ class UserSessionDB(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("personal.users.id", ondelete="CASCADE"),
+        ForeignKey("dbo.users.id", ondelete="CASCADE"),
         index=True,
     )
-    refresh_token_hash: Mapped[bytes] = mapped_column(LargeBinary)
+    refresh_token_hash: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
     previous_token_hash: Mapped[bytes | None] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
