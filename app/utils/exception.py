@@ -44,3 +44,15 @@ class SessionInvalidError(Exception):
 
 class SessionRetryError(Exception):
     """Parallel refresh inside the grace window; the session is NOT revoked."""
+
+
+class ZoneNotFoundError(Exception):
+    """Zone not found."""
+
+
+class InvalidZoneReferenceError(Exception):
+    """A status, assignment rule or manager referenced by the zone does not exist."""
+
+
+class NoDataError(Exception):
+    """No zone is available for the requesting user."""
