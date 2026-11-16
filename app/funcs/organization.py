@@ -7,16 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db_entities.organizations import OrganizationDB
 from app.schema.organization import OrganizationCreate, OrganizationUpdate
+from app.utils.exception import InvalidOrganizationTypeError, OrganizationNotFoundError
 
 _SQLSTATE_FOREIGN_KEY_VIOLATION = "23503"
-
-
-class OrganizationNotFoundError(Exception):
-    """Organization not found."""
-
-
-class InvalidOrganizationTypeError(Exception):
-    """The organization type does not exist in the dictionary."""
 
 
 class Organization:

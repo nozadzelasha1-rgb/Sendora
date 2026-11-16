@@ -5,8 +5,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db_connector import get_session
-from app.funcs.auth import Auth, InvalidTokenError, TokenExpiredError
+from app.funcs.auth import Auth
 from app.schema.user import UserRead
+from app.utils.exception import InvalidTokenError, TokenExpiredError
 
 bearer_scheme = HTTPBearer(auto_error=False)
 

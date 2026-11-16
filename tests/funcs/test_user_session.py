@@ -16,13 +16,12 @@ from app.funcs.user_session import (
     REASON_LOGOUT_ALL,
     REASON_REUSE,
     REASON_USER_INACTIVE,
-    SessionInvalidError,
-    SessionRetryError,
     UserSession,
     hash_secret,
     parse_refresh_token,
 )
 from app.schema.user import UserCreate
+from app.utils.exception import SessionInvalidError, SessionRetryError
 from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
 PASSWORD = "password123"

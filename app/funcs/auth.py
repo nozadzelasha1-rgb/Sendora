@@ -8,36 +8,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings
 from app.db_entities.users.user import UserDB
 from app.funcs.user import User
-from app.funcs.user_session import (
-    SessionInvalidError,
-    SessionRetryError,
-    UserSession,
-)
+from app.funcs.user_session import UserSession
 from app.schema.auth import TokenUser
 from app.schema.user import UserCredentials
+from app.utils.exception import (
+    AuthError,
+    InvalidTokenError,
+    RefreshRetryError,
+    RefreshTokenError,
+    SessionInvalidError,
+    SessionRetryError,
+    TokenExpiredError,
+)
 from app.utils.time_utils import get_local_time
 
 ACCESS_TOKEN_TYPE = "access"
-
-
-class AuthError(Exception):
-    """Base class for authentication failures."""
-
-
-class TokenExpiredError(AuthError):
-    """The access token has expired."""
-
-
-class InvalidTokenError(AuthError):
-    """The access token is missing, malformed, tampered or not usable."""
-
-
-class RefreshTokenError(AuthError):
-    """The refresh token is invalid, expired, revoked or reused."""
-
-
-class RefreshRetryError(AuthError):
-    """A parallel refresh is in progress inside the grace window; retry."""
 
 
 class LoginResult(NamedTuple):

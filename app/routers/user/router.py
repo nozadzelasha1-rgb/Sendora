@@ -3,16 +3,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings
 from app.core.db_connector import get_session
-from app.funcs.auth import Auth, RefreshRetryError, RefreshTokenError
-from app.funcs.user import (
-    InvalidReferenceError,
-    User,
-    UserAlreadyExistsError,
-    UserNotFoundError,
-)
+from app.funcs.auth import Auth
+from app.funcs.user import User
 from app.routers.dependencies import get_current_user
 from app.schema.auth import LogoutRequest, RefreshRequest, TokenResponse
 from app.schema.user import UserCreate, UserCredentials, UserRead
+from app.utils.exception import (
+    InvalidReferenceError,
+    RefreshRetryError,
+    RefreshTokenError,
+    UserAlreadyExistsError,
+    UserNotFoundError,
+)
 
 router = APIRouter(prefix="/users", tags=["User"])
 

@@ -5,12 +5,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db_entities.organizations import OrganizationDB
-from app.funcs.organization import (
-    InvalidOrganizationTypeError,
-    Organization,
-    OrganizationNotFoundError,
-)
+from app.funcs.organization import Organization
 from app.schema.organization import OrganizationCreate, OrganizationUpdate
+from app.utils.exception import InvalidOrganizationTypeError, OrganizationNotFoundError
 from tests.seed import TEST_ROLE_ID
 
 UNKNOWN_TYPE = 987654

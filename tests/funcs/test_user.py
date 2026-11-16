@@ -7,13 +7,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db_entities.users.user import UserDB
-from app.funcs.user import (
+from app.funcs.user import User
+from app.schema.user import UserCreate, UserCredentials
+from app.utils.exception import (
     InvalidReferenceError,
-    User,
     UserAlreadyExistsError,
     UserNotFoundError,
 )
-from app.schema.user import UserCreate, UserCredentials
 from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
 PASSWORD = "password123"

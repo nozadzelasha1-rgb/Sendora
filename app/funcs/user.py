@@ -10,24 +10,17 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.db_entities.users.user import UserDB
 from app.schema.user import UserCreate, UserCredentials
+from app.utils.exception import (
+    InvalidReferenceError,
+    UserAlreadyExistsError,
+    UserNotFoundError,
+)
 
 _password_hash = PasswordHash.recommended()
 # Verified against when no user is found, so timing does not reveal existence.
 _DUMMY_HASH: str = _password_hash.hash("dummy-password-for-timing")
 _SQLSTATE_UNIQUE_VIOLATION = "23505"
 _SQLSTATE_FOREIGN_KEY_VIOLATION = "23503"
-
-
-class UserAlreadyExistsError(Exception):
-    """A user with the same name, phone or email already exists."""
-
-
-class InvalidReferenceError(Exception):
-    """The role or organization referenced by the user does not exist."""
-
-
-class UserNotFoundError(Exception):
-    """User not found, inactive, or credentials are invalid."""
 
 
 class User:

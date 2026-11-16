@@ -11,19 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings
 from app.db_entities.users.user import UserDB
 from app.db_entities.users.user_session import UserSessionDB
+from app.utils.exception import SessionInvalidError, SessionRetryError
 
 REASON_LOGOUT = "logout"
 REASON_LOGOUT_ALL = "logout_all"
 REASON_REUSE = "reuse"
 REASON_USER_INACTIVE = "user_inactive"
-
-
-class SessionInvalidError(Exception):
-    """The session is missing, invalid, expired, revoked or the token mismatches."""
-
-
-class SessionRetryError(Exception):
-    """Parallel refresh inside the grace window; the session is NOT revoked."""
 
 
 def hash_secret(secret: str) -> bytes:
