@@ -4,11 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db_connector import get_session
-from app.funcs.organization import (
-    InvalidOrganizationTypeError,
-    Organization,
-    OrganizationNotFoundError,
-)
+from app.funcs.organization import Organization
 from app.routers.dependencies import FORBIDDEN_DETAIL, require_roles
 from app.schema.organization import (
     OrganizationCreate,
@@ -16,6 +12,7 @@ from app.schema.organization import (
     OrganizationUpdate,
 )
 from app.utils.constant import ADMIN_OPERATOR_ROLE_ID, SUPER_ADMIN_ROLE_ID
+from app.utils.exception import InvalidOrganizationTypeError, OrganizationNotFoundError
 
 ORGANIZATION_ALLOWED_ROLE_IDS = (SUPER_ADMIN_ROLE_ID, ADMIN_OPERATOR_ROLE_ID)
 

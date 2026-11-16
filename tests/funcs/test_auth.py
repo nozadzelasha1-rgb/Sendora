@@ -11,18 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings
 from app.db_entities.users.user import UserDB
 from app.db_entities.users.user_session import UserSessionDB
-from app.funcs.auth import (
-    ACCESS_TOKEN_TYPE,
-    Auth,
+from app.funcs.auth import ACCESS_TOKEN_TYPE, Auth, LoginResult
+from app.funcs.user import User
+from app.funcs.user_session import UserSession, parse_refresh_token
+from app.schema.user import UserCreate, UserCredentials
+from app.utils.exception import (
     InvalidTokenError,
-    LoginResult,
     RefreshRetryError,
     RefreshTokenError,
     TokenExpiredError,
+    UserNotFoundError,
 )
-from app.funcs.user import User, UserNotFoundError
-from app.funcs.user_session import UserSession, parse_refresh_token
-from app.schema.user import UserCreate, UserCredentials
 from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
 PASSWORD = "password123"

@@ -10,12 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.db_entities.users.user import UserDB
 from app.db_entities.users.user_session import UserSessionDB
 from app.funcs.user import User
-from app.funcs.user_session import (
-    REASON_REUSE,
-    SessionRetryError,
-    UserSession,
-)
+from app.funcs.user_session import REASON_REUSE, UserSession
 from app.schema.user import UserCreate
+from app.utils.exception import SessionRetryError
 from tests.seed import TEST_ORG_ID, TEST_ROLE_ID, seed_references
 
 PASSWORD = "password123"
