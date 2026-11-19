@@ -45,7 +45,8 @@ CREATE TABLE dbo.order_recipients (
     floor text,
     apartment text,
     door_code text,
-    landmark text
+    landmark text,
+    user_id uuid REFERENCES dbo.users(id)
 );
 
 CREATE TABLE dbo.order_parcels (

@@ -105,6 +105,9 @@ class OrderRecipientDB(Base):
     apartment: Mapped[str | None] = mapped_column(Text)
     door_code: Mapped[str | None] = mapped_column(Text)
     landmark: Mapped[str | None] = mapped_column(Text)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("dbo.users.id")
+    )
 
 
 class OrderParcelDB(Base):

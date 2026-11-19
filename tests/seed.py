@@ -6,7 +6,12 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.utils.constant import ADMIN_OPERATOR_ROLE_ID, SUPER_ADMIN_ROLE_ID
+from app.utils.constant import (
+    ADMIN_OPERATOR_ROLE_ID,
+    ORDER_STATUS_CANCELLED_ID,
+    ORDER_STATUS_CREATED_ID,
+    SUPER_ADMIN_ROLE_ID,
+)
 
 TEST_SPEC_ID = 9001
 TEST_ROLE_ID = 9001
@@ -38,6 +43,8 @@ async def seed_references(session: AsyncSession) -> None:
     for role_id, role_name in (
         (SUPER_ADMIN_ROLE_ID, "super_admin"),
         (ADMIN_OPERATOR_ROLE_ID, "admin_operator"),
+        (ORDER_STATUS_CANCELLED_ID, "order_cancelled"),
+        (ORDER_STATUS_CREATED_ID, "order_created"),
     ):
         await session.execute(
             text(
