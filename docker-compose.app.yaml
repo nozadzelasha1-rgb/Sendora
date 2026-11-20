@@ -1,0 +1,34 @@
+# Application container. Used together with the base file:
+#   docker compose -f docker-compose.yaml -f docker-compose.app.yaml up -d --build
+# Or simply via ./dev.sh
+services:
+  app:
+    build: .
+    container_name: sendora-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Inside the compose network the database is reachable as the "postgres" service
+      # on its container port, independent of the host port published below.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      HOST: 0.0.0.0
+    ports:
+      - "${PORT:-8020}:8020"
+    volumes:
+      # Dev bind mount: code edits are picked up by --reload without rebuilding the image.
+      - ./:/app
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8020", "--reload"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8020/v0/openapi.json', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

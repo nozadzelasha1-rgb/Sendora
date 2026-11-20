@@ -79,6 +79,22 @@ def test_settings_missing_environment_raises_validation_error() -> None:
         Settings(_env_file=None, **BASE_VALUES)
 
 
+def test_db_url_defaults_to_localhost() -> None:
+    settings = _settings()
+
+    assert settings.build_db_url == (
+        "postgresql+asyncpg://test:test@localhost:5432/sendora_test"
+    )
+
+
+def test_db_url_uses_configured_host() -> None:
+    settings = _settings(POSTGRES_HOST="postgres")
+
+    assert settings.build_db_url == (
+        "postgresql+asyncpg://test:test@postgres:5432/sendora_test"
+    )
+
+
 def test_settings_missing_environment_with_weak_secret_raises_validation_error() -> (
     None
 ):

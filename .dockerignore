@@ -1,0 +1,25 @@
+# Secrets and local environment never enter the image; .env is passed at runtime via env_file.
+.env
+.env.*
+.venv
+venv
+
+# VCS, editor and tool state
+.git
+.gitignore
+.idea
+.DS_Store
+.claude
+.codegraph
+.mypy_cache
+.pytest_cache
+.ruff_cache
+__pycache__
+**/__pycache__
+
+# Not needed to run the app
+tests
+docs
+Dockerfile.test
+docker-compose*.yaml
+dev.sh
