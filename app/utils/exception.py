@@ -56,3 +56,19 @@ class InvalidZoneReferenceError(Exception):
 
 class NoDataError(Exception):
     """No zone is available for the requesting user."""
+
+
+class OrderNotFoundError(Exception):
+    """Order not found or not visible to the requesting user."""
+
+
+class OrderForbiddenError(Exception):
+    """The requesting user may not perform this action on the order."""
+
+
+class InvalidOrderReferenceError(Exception):
+    """A dictionary, zone, organization or user referenced by the order does not exist."""
+
+
+class OrderConflictError(Exception):
+    """An order with the same external_order_id already exists for the partner."""
