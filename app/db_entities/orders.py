@@ -14,7 +14,6 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
-    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,15 +23,11 @@ from app.db_entities.base import Base
 
 class OrderDB(Base):
     __tablename__ = "orders"
-    __table_args__ = (
-        UniqueConstraint("partner_id", "external_order_id"),
-        {"schema": "dbo"},
-    )
+    __table_args__ = ({"schema": "dbo"},)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     tracking_number: Mapped[str] = mapped_column(Text, unique=True)
-    external_order_id: Mapped[str | None] = mapped_column(Text)
-    partner_id: Mapped[uuid.UUID] = mapped_column(
+    organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("dbo.organizations.id")
     )
     service_type: Mapped[int] = mapped_column(
@@ -105,9 +100,6 @@ class OrderRecipientDB(Base):
     apartment: Mapped[str | None] = mapped_column(Text)
     door_code: Mapped[str | None] = mapped_column(Text)
     landmark: Mapped[str | None] = mapped_column(Text)
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("dbo.users.id")
-    )
 
 
 class OrderParcelDB(Base):

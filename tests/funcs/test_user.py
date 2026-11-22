@@ -14,7 +14,7 @@ from app.utils.exception import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
-from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
+from tests.seed import TEST_ROLE_ID
 
 PASSWORD = "password123"
 
@@ -29,7 +29,6 @@ async def _make(
     return await User(session).create(
         UserCreate(
             role=TEST_ROLE_ID,
-            organization_id=TEST_ORG_ID,
             name=name,
             password=password,
             phone=phone,
@@ -82,7 +81,6 @@ async def test_create_persists_normalized_fields(session: AsyncSession) -> None:
     user = await User(session).create(
         UserCreate(
             role=TEST_ROLE_ID,
-            organization_id=TEST_ORG_ID,
             name="  Alice_01 ",
             password=PASSWORD,
             phone=" +79991234567 ",
@@ -473,7 +471,6 @@ async def test_create_unknown_role_raises_invalid_reference_error(
         await User(session).create(
             UserCreate(
                 role=987654,
-                organization_id=TEST_ORG_ID,
                 name="alice",
                 password=PASSWORD,
             )

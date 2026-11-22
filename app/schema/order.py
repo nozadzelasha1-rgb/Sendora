@@ -45,7 +45,7 @@ class OrderSenderIn(BaseModel):
 
 
 class OrderRecipientIn(BaseModel):
-    """Recipient block. user_id null means: link to the active user with the same phone."""
+    """Recipient block of an order. Recipients are not linked to user accounts."""
 
     recipient_name: _NAME
     recipient_phone: _PHONE
@@ -59,7 +59,6 @@ class OrderRecipientIn(BaseModel):
     apartment: _SHORT = None
     door_code: _SHORT = None
     landmark: _SHORT = None
-    user_id: uuid.UUID | None = None
 
 
 class OrderParcelIn(BaseModel):
@@ -109,12 +108,11 @@ class OrderPaymentIn(BaseModel):
 class OrderCreate(BaseModel):
     """Payload for creating an order with all its blocks.
 
-    partner_id is required for admins and must be omitted or equal to the
-    caller's organization for other users.
+    organization_id is required for admins. Other users must be members of the
+    organization they pass; when omitted, their only organization is used.
     """
 
-    external_order_id: _SHORT = None
-    partner_id: uuid.UUID | None = None
+    organization_id: uuid.UUID | None = None
     service_type: int
     zone_id: uuid.UUID | None = None
     sender: OrderSenderIn
@@ -155,7 +153,7 @@ class OrderListItem(BaseModel):
     id: int
     tracking_number: str
     status: int
-    partner_id: uuid.UUID
+    organization_id: uuid.UUID
     service_type: int
     zone_id: uuid.UUID | None
     courier_id: uuid.UUID | None
@@ -188,7 +186,6 @@ class RecipientRead(BaseModel):
     apartment: str | None
     door_code: str | None
     landmark: str | None
-    user_id: uuid.UUID | None
 
 
 class ParcelRead(BaseModel):
@@ -287,8 +284,7 @@ class OrderRead(BaseModel):
 
     id: int
     tracking_number: str
-    external_order_id: str | None
-    partner_id: uuid.UUID
+    organization_id: uuid.UUID
     service_type: int
     zone_id: uuid.UUID | None
     courier_id: uuid.UUID | None

@@ -6,6 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db_entities.orders import OrderDB, OrderOperationDB
+from app.db_entities.organizations import OrganizationUserDB
 from app.db_entities.users.user import UserDB
 from app.funcs.order import Order, OrderDetail, OrderFilter
 from app.schema.order import (
@@ -25,6 +26,7 @@ from app.utils.exception import (
     InvalidOrderReferenceError,
     OrderForbiddenError,
     OrderNotFoundError,
+    OrganizationChoiceRequiredError,
 )
 from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
@@ -42,6 +44,11 @@ async def _make_org(session: AsyncSession, org_id: uuid.UUID) -> None:
     )
 
 
+async def _join(session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID) -> None:
+    session.add(OrganizationUserDB(organization_id=org_id, user_id=user_id))
+    await session.flush()
+
+
 async def _user(
     session: AsyncSession,
     *,
@@ -53,12 +60,12 @@ async def _user(
         id=uuid.uuid4(),
         name=f"user-{uuid.uuid4().hex[:8]}",
         role=role,
-        organization_id=organization_id,
         active=True,
         phone=phone,
     )
     session.add(user)
     await session.flush()
+    await _join(session, user.id, organization_id)
     return UserRead.model_validate(user, from_attributes=True)
 
 
@@ -98,10 +105,10 @@ async def _create(
 
 async def test_create_writes_all_blocks_and_first_status(session: AsyncSession) -> None:
     user = await _user(session)
-    detail = await _create(session, user, external_order_id="ext-1")
+    detail = await _create(session, user)
 
     assert detail.order.status == ORDER_STATUS_CREATED_ID
-    assert detail.order.partner_id == TEST_ORG_ID
+    assert detail.order.organization_id == TEST_ORG_ID
     assert detail.order.tracking_number.startswith("SND")
     assert detail.sender is not None
     assert detail.recipient is not None
@@ -112,29 +119,48 @@ async def test_create_writes_all_blocks_and_first_status(session: AsyncSession) 
     assert detail.history[0].status == ORDER_STATUS_CREATED_ID
 
 
-async def test_create_links_recipient_to_user_with_same_phone(
-    session: AsyncSession,
-) -> None:
-    recipient = await _user(session, phone="+79990000002")
-    sender = await _user(session)
-    detail = await _create(session, sender)
-
-    assert detail.recipient is not None
-    assert detail.recipient.user_id == recipient.id
-
-
-async def test_create_non_admin_with_foreign_partner_raises(
+async def test_create_non_admin_with_foreign_organization_raises(
     session: AsyncSession,
 ) -> None:
     user = await _user(session)
     await _make_org(session, OTHER_ORG_ID)
     with pytest.raises(OrderForbiddenError):
-        await _create(session, user, partner_id=OTHER_ORG_ID)
+        await _create(session, user, organization_id=OTHER_ORG_ID)
 
 
-async def test_create_admin_requires_partner_id(session: AsyncSession) -> None:
+async def test_create_non_admin_defaults_to_only_organization(
+    session: AsyncSession,
+) -> None:
+    user = await _user(session)
+    detail = await _create(session, user)
+    assert detail.order.organization_id == TEST_ORG_ID
+
+
+async def test_create_non_admin_in_several_organizations_must_name_one(
+    session: AsyncSession,
+) -> None:
+    await _make_org(session, OTHER_ORG_ID)
+    user = await _user(session)
+    await _join(session, user.id, OTHER_ORG_ID)
+    with pytest.raises(OrganizationChoiceRequiredError):
+        await _create(session, user)
+    detail = await _create(session, user, organization_id=OTHER_ORG_ID)
+    assert detail.order.organization_id == OTHER_ORG_ID
+
+
+async def test_create_user_without_organization_raises(session: AsyncSession) -> None:
+    user = await _user(session)
+    await session.execute(
+        text("DELETE FROM dbo.organizations_users WHERE user_id = :id"),
+        {"id": user.id},
+    )
+    with pytest.raises(OrderForbiddenError):
+        await _create(session, user)
+
+
+async def test_create_admin_requires_organization_id(session: AsyncSession) -> None:
     admin = await _user(session, role=SUPER_ADMIN_ROLE_ID)
-    with pytest.raises(InvalidOrderReferenceError):
+    with pytest.raises(OrganizationChoiceRequiredError):
         await _create(session, admin)
 
 
@@ -142,15 +168,15 @@ async def test_create_unknown_reference_raises_and_persists_nothing(
     session: AsyncSession,
 ) -> None:
     user = await _user(session)
-    unknown_service = 987654
+    count_before = (
+        await session.execute(text("SELECT count(*) FROM dbo.orders"))
+    ).scalar_one()
     with pytest.raises(InvalidOrderReferenceError):
-        await _create(
-            session, user, external_order_id="rolled-back", service_type=unknown_service
-        )
-    result = await session.execute(
-        text("SELECT count(*) FROM dbo.orders WHERE external_order_id = 'rolled-back'")
-    )
-    assert result.scalar_one() == 0
+        await _create(session, user, service_type=987654)
+    count_after = (
+        await session.execute(text("SELECT count(*) FROM dbo.orders"))
+    ).scalar_one()
+    assert count_after == count_before
 
 
 # --- reads and visibility ----------------------------------------------------------
@@ -172,10 +198,9 @@ async def test_unrelated_user_gets_not_found(session: AsyncSession) -> None:
         await Order(session).get(detail.order.id, stranger)
 
 
-async def test_recipient_manager_and_courier_see_the_order(
+async def test_manager_and_courier_see_the_order(
     session: AsyncSession,
 ) -> None:
-    recipient = await _user(session, phone="+79990000002")
     detail = await _create(session, await _user(session))
     manager = await _user(session)
     courier = await _user(session)
@@ -187,7 +212,7 @@ async def test_recipient_manager_and_courier_see_the_order(
     detail.order.courier_id = courier.id
     await session.commit()
 
-    for viewer in (recipient, manager, courier):
+    for viewer in (manager, courier):
         fetched = await Order(session).get(detail.order.id, viewer)
         assert fetched.order.id == detail.order.id
 
@@ -211,7 +236,7 @@ async def test_list_for_sender_is_limited_to_own_organization(
     await _create(session, await _user(session, organization_id=OTHER_ORG_ID))
     rows, total = await Order(session).list(own, 50, 0, OrderFilter())
     assert total == 2
-    assert all(row[0].partner_id == TEST_ORG_ID for row in rows)
+    assert all(row[0].organization_id == TEST_ORG_ID for row in rows)
 
 
 async def test_list_pagination_and_empty_page_total(session: AsyncSession) -> None:
@@ -266,27 +291,6 @@ async def test_sender_cannot_update_after_status_changed(session: AsyncSession) 
         await Order(session).update(
             detail.order.id, OrderUpdate(tracking_url="https://example.test/x"), user
         )
-
-
-async def test_update_recipient_block_relinks_by_phone_when_user_id_missing(
-    session: AsyncSession,
-) -> None:
-    new_recipient = await _user(session, phone="+79990000099")
-    user = await _user(session)
-    detail = await _create(session, user)
-    recipient_block: dict[str, Any] = {
-        "recipient_name": "Clara",
-        "recipient_phone": "+79990000099",
-        "delivery_address": "Pekini 5",
-        "city": "Tbilisi",
-    }
-    updated = await Order(session).update(
-        detail.order.id,
-        OrderUpdate.model_validate({"recipient": recipient_block}),
-        user,
-    )
-    assert updated.recipient is not None
-    assert updated.recipient.user_id == new_recipient.id
 
 
 async def test_update_missing_order_raises(session: AsyncSession) -> None:
@@ -411,3 +415,77 @@ async def test_operation_model_is_loaded_for_detail(session: AsyncSession) -> No
     assert isinstance(refreshed.operation, OrderOperationDB)
     assert isinstance(refreshed.order, OrderDB)
     assert refreshed.operation.carrier_id == "C1"
+
+
+# --- list filter by user ----------------------------------------------------------
+
+
+async def test_admin_filters_orders_by_user_organizations(
+    session: AsyncSession,
+) -> None:
+    await _make_org(session, OTHER_ORG_ID)
+    member = await _user(session)
+    await _create(session, member)
+    other_member = await _user(session, organization_id=OTHER_ORG_ID)
+    await _create(session, other_member)
+    admin = await _user(session, role=SUPER_ADMIN_ROLE_ID)
+
+    rows, total = await Order(session).list(
+        admin, 50, 0, OrderFilter(user_id=member.id)
+    )
+
+    assert total == 1
+    assert rows[0][0].organization_id == TEST_ORG_ID
+
+
+async def test_user_without_organizations_matches_no_orders(
+    session: AsyncSession,
+) -> None:
+    user = await _user(session)
+    await _create(session, user)
+    await session.execute(
+        text("DELETE FROM dbo.organizations_users WHERE user_id = :id"),
+        {"id": user.id},
+    )
+    admin = await _user(session, role=SUPER_ADMIN_ROLE_ID)
+
+    rows, total = await Order(session).list(admin, 50, 0, OrderFilter(user_id=user.id))
+
+    assert rows == []
+    assert total == 0
+
+
+async def test_user_filter_intersects_with_organization_filter(
+    session: AsyncSession,
+) -> None:
+    await _make_org(session, OTHER_ORG_ID)
+    member = await _user(session)
+    await _join(session, member.id, OTHER_ORG_ID)
+    await _create(session, member, organization_id=TEST_ORG_ID)
+    await _create(session, member, organization_id=OTHER_ORG_ID)
+    admin = await _user(session, role=SUPER_ADMIN_ROLE_ID)
+
+    rows, total = await Order(session).list(
+        admin, 50, 0, OrderFilter(user_id=member.id, organization_id=TEST_ORG_ID)
+    )
+
+    assert total == 1
+    assert rows[0][0].organization_id == TEST_ORG_ID
+
+
+async def test_non_admin_may_filter_by_own_user_id(session: AsyncSession) -> None:
+    user = await _user(session)
+    await _create(session, user)
+
+    _, total_plain = await Order(session).list(user, 50, 0, OrderFilter())
+    _, total_own = await Order(session).list(user, 50, 0, OrderFilter(user_id=user.id))
+
+    assert total_plain == total_own == 1
+
+
+async def test_non_admin_cannot_filter_by_another_user(session: AsyncSession) -> None:
+    user = await _user(session)
+    other = await _user(session)
+
+    with pytest.raises(OrderForbiddenError):
+        await Order(session).list(user, 50, 0, OrderFilter(user_id=other.id))

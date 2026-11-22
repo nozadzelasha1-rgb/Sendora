@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings
+from app.funcs.organization import Organization
 from app.utils.constant import ADMIN_OPERATOR_ROLE_ID, SUPER_ADMIN_ROLE_ID
 from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
@@ -24,27 +25,56 @@ OTHER_ORG_ID = "00000000-0000-4000-8000-00000000a003"
 BearerHeaders = Callable[..., Awaitable[dict[str, str]]]
 
 
+async def _ensure_org(session: AsyncSession, org_id: str) -> None:
+    await session.execute(
+        text(
+            "INSERT INTO dbo.organizations (id, name, type) "
+            "VALUES (:id, 'test_org', :type_id) ON CONFLICT (id) DO NOTHING"
+        ),
+        {"id": uuid.UUID(org_id), "type_id": TEST_ROLE_ID},
+    )
+    await session.commit()
+
+
 async def _user(
+    session: AsyncSession,
     client: AsyncClient,
     bearer_headers: BearerHeaders,
     name: str,
     role: int = TEST_ROLE_ID,
-    organization_id: str = str(TEST_ORG_ID),
-    phone: str | None = None,
+    organization_id: str | None = str(TEST_ORG_ID),
 ) -> tuple[str, dict[str, str]]:
-    """Create a user through the API, log in and return (user id, Authorization header)."""
-    payload: dict[str, Any] = {
-        "name": name,
-        "password": PASSWORD,
-        "role": role,
-        "organization_id": organization_id,
-    }
-    if phone is not None:
-        payload["phone"] = phone
-    response = await client.post(USERS_URL, json=payload)
+    """Create a user through the API, make it a member of the organization, log in.
+
+    Return (user id, Authorization header).
+    """
+    response = await client.post(
+        USERS_URL,
+        json={"name": name, "password": PASSWORD, "role": role},
+    )
     assert response.status_code == 201, response.text
+    user_id = str(response.json()["id"])
+    if organization_id is not None:
+        await _ensure_org(session, organization_id)
+        await Organization(session).add_user(
+            uuid.UUID(organization_id), uuid.UUID(user_id)
+        )
     headers = await bearer_headers(name)
-    return str(response.json()["id"]), headers
+    return user_id, headers
+
+
+async def _admin(
+    session: AsyncSession, client: AsyncClient, bearer_headers: BearerHeaders
+) -> dict[str, str]:
+    _, headers = await _user(
+        session,
+        client,
+        bearer_headers,
+        "admin",
+        role=SUPER_ADMIN_ROLE_ID,
+        organization_id=None,
+    )
+    return headers
 
 
 def _order_body(**overrides: Any) -> dict[str, Any]:
@@ -83,11 +113,6 @@ async def _create_order(
     return body
 
 
-async def _admin(client: AsyncClient, bearer_headers: BearerHeaders) -> dict[str, str]:
-    _, headers = await _user(client, bearer_headers, "admin", role=SUPER_ADMIN_ROLE_ID)
-    return headers
-
-
 # --- authentication ----------------------------------------------------------------
 
 _SOME_ID = 999_999_999
@@ -116,34 +141,78 @@ async def test_endpoint_without_token_returns_401(
 
 
 async def test_sender_creates_order_for_own_organization(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    _, headers = await _user(client, bearer_headers, "sender")
-    body = await _create_order(client, headers, external_order_id="ext-http-1")
+    _, headers = await _user(session, client, bearer_headers, "sender")
+    body = await _create_order(client, headers)
 
     assert body["status"] == 2
-    assert body["partner_id"] == str(TEST_ORG_ID)
+    assert body["organization_id"] == str(TEST_ORG_ID)
+    assert "external_order_id" not in body
     assert body["tracking_number"].startswith("SND")
     assert body["sender"]["sender_company"] == "Shop"
     assert body["recipient"]["recipient_name"] == "Boris"
+    assert "user_id" not in body["recipient"]
     assert len(body["status_history"]) == 1
 
 
 async def test_sender_cannot_create_for_foreign_organization(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    _, headers = await _user(client, bearer_headers, "sender")
+    _, headers = await _user(session, client, bearer_headers, "sender")
+    await _ensure_org(session, OTHER_ORG_ID)
     response = await client.post(
-        ORDERS_URL, json=_order_body(partner_id=OTHER_ORG_ID), headers=headers
+        ORDERS_URL,
+        json=_order_body(organization_id=OTHER_ORG_ID),
+        headers=headers,
     )
     assert response.status_code == 403
     assert response.json() == {"detail": FORBIDDEN_DETAIL}
 
 
-async def test_create_with_unknown_reference_returns_422(
-    client: AsyncClient, bearer_headers: BearerHeaders
+async def test_user_in_several_organizations_must_name_one(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    _, headers = await _user(client, bearer_headers, "sender")
+    user_id, headers = await _user(session, client, bearer_headers, "multi")
+    await _ensure_org(session, OTHER_ORG_ID)
+    await Organization(session).add_user(uuid.UUID(OTHER_ORG_ID), uuid.UUID(user_id))
+
+    response = await client.post(ORDERS_URL, json=_order_body(), headers=headers)
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Choose the organization the order is created for"
+    }
+
+    named = await _create_order(client, headers, organization_id=OTHER_ORG_ID)
+    assert named["organization_id"] == OTHER_ORG_ID
+
+
+async def test_admin_must_send_organization_id(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
+) -> None:
+    admin = await _admin(session, client, bearer_headers)
+    response = await client.post(ORDERS_URL, json=_order_body(), headers=admin)
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Choose the organization the order is created for"
+    }
+
+
+async def test_user_without_organization_gets_403_on_create(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
+) -> None:
+    _, headers = await _user(
+        session, client, bearer_headers, "loner", organization_id=None
+    )
+    response = await client.post(ORDERS_URL, json=_order_body(), headers=headers)
+    assert response.status_code == 403
+    assert response.json() == {"detail": FORBIDDEN_DETAIL}
+
+
+async def test_create_with_unknown_reference_returns_422(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
+) -> None:
+    _, headers = await _user(session, client, bearer_headers, "sender")
     response = await client.post(
         ORDERS_URL, json=_order_body(service_type=UNKNOWN_SERVICE), headers=headers
     )
@@ -152,9 +221,9 @@ async def test_create_with_unknown_reference_returns_422(
 
 
 async def test_create_with_missing_block_returns_422(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    _, headers = await _user(client, bearer_headers, "sender")
+    _, headers = await _user(session, client, bearer_headers, "sender")
     body = _order_body()
     del body["sender"]
     response = await client.post(ORDERS_URL, json=body, headers=headers)
@@ -167,22 +236,38 @@ async def test_create_with_missing_block_returns_422(
 async def test_stranger_gets_404_for_order(
     client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    _, sender = await _user(client, bearer_headers, "sender")
+    _, sender = await _user(session, client, bearer_headers, "sender")
     created = await _create_order(client, sender)
-    await _ensure_other_org(session)
     _, stranger = await _user(
-        client, bearer_headers, "stranger", organization_id=OTHER_ORG_ID
+        session, client, bearer_headers, "stranger", organization_id=OTHER_ORG_ID
     )
     response = await client.get(f"{ORDERS_URL}/{created['id']}", headers=stranger)
     assert response.status_code == 404
     assert response.json() == {"detail": NOT_FOUND_DETAIL}
 
 
-async def test_internal_operation_fields_hidden_from_sender(
-    client: AsyncClient, bearer_headers: BearerHeaders
+async def test_member_of_second_organization_sees_its_orders(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    admin = await _admin(client, bearer_headers)
-    _, sender = await _user(client, bearer_headers, "sender")
+    await _ensure_org(session, OTHER_ORG_ID)
+    _, creator = await _user(
+        session, client, bearer_headers, "creator", organization_id=OTHER_ORG_ID
+    )
+    created = await _create_order(client, creator, organization_id=OTHER_ORG_ID)
+
+    viewer_id, viewer = await _user(session, client, bearer_headers, "viewer")
+    await Organization(session).add_user(uuid.UUID(OTHER_ORG_ID), uuid.UUID(viewer_id))
+
+    response = await client.get(f"{ORDERS_URL}/{created['id']}", headers=viewer)
+    assert response.status_code == 200
+    assert response.json()["id"] == created["id"]
+
+
+async def test_internal_operation_fields_hidden_from_sender(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
+) -> None:
+    admin = await _admin(session, client, bearer_headers)
+    _, sender = await _user(session, client, bearer_headers, "sender")
     created = await _create_order(client, sender)
     response = await client.put(
         f"{ORDERS_URL}/{created['id']}/operation",
@@ -201,9 +286,9 @@ async def test_internal_operation_fields_hidden_from_sender(
 
 
 async def test_list_returns_total_count_header(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    _, sender = await _user(client, bearer_headers, "sender")
+    _, sender = await _user(session, client, bearer_headers, "sender")
     await _create_order(client, sender)
     await _create_order(client, sender)
     response = await client.get(f"{ORDERS_URL}?limit=1", headers=sender)
@@ -213,9 +298,9 @@ async def test_list_returns_total_count_header(
 
 
 async def test_list_rejects_invalid_limit(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    headers = await _admin(client, bearer_headers)
+    headers = await _admin(session, client, bearer_headers)
     response = await client.get(f"{ORDERS_URL}?limit=0", headers=headers)
     assert response.status_code == 422
 
@@ -223,63 +308,29 @@ async def test_list_rejects_invalid_limit(
 # --- update ----------------------------------------------------------------------
 
 
-async def _ensure_other_org(session: AsyncSession) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO dbo.organizations (id, name, type) "
-            "VALUES (:id, 'other_org', :type_id) ON CONFLICT (id) DO NOTHING"
-        ),
-        {"id": uuid.UUID(OTHER_ORG_ID), "type_id": TEST_ROLE_ID},
-    )
-    await session.commit()
-
-
-async def test_recipient_cannot_update_order(
+async def test_user_outside_organization_cannot_update_order(
     client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    await _ensure_other_org(session)
-    _, recipient = await _user(
-        client,
-        bearer_headers,
-        "recipient",
-        organization_id=OTHER_ORG_ID,
-        phone="+79990000002",
+    _, outsider = await _user(
+        session, client, bearer_headers, "outsider", organization_id=OTHER_ORG_ID
     )
-    _, sender = await _user(client, bearer_headers, "sender")
+    _, sender = await _user(session, client, bearer_headers, "sender")
     created = await _create_order(client, sender)
     response = await client.patch(
         f"{ORDERS_URL}/{created['id']}",
         json={"tracking_url": "https://example.test/x"},
-        headers=recipient,
+        headers=outsider,
     )
-    assert response.status_code == 403
-    assert response.json() == {"detail": FORBIDDEN_DETAIL}
-
-
-async def test_recipient_sees_order_he_is_waiting_for(
-    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
-) -> None:
-    await _ensure_other_org(session)
-    _, recipient = await _user(
-        client,
-        bearer_headers,
-        "recipient",
-        organization_id=OTHER_ORG_ID,
-        phone="+79990000002",
-    )
-    _, sender = await _user(client, bearer_headers, "sender")
-    created = await _create_order(client, sender)
-    response = await client.get(f"{ORDERS_URL}/{created['id']}", headers=recipient)
-    assert response.status_code == 200
-    assert response.json()["id"] == created["id"]
+    assert response.status_code == 404
+    assert response.json() == {"detail": NOT_FOUND_DETAIL}
 
 
 async def test_admin_assigns_courier_who_then_changes_status(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    admin = await _admin(client, bearer_headers)
-    _, sender = await _user(client, bearer_headers, "sender")
-    courier_id, courier = await _user(client, bearer_headers, "courier")
+    admin = await _admin(session, client, bearer_headers)
+    _, sender = await _user(session, client, bearer_headers, "sender")
+    courier_id, courier = await _user(session, client, bearer_headers, "courier")
     created = await _create_order(client, sender)
 
     patched = await client.patch(
@@ -298,9 +349,9 @@ async def test_admin_assigns_courier_who_then_changes_status(
 
 
 async def test_sender_cannot_add_status(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    _, sender = await _user(client, bearer_headers, "sender")
+    _, sender = await _user(session, client, bearer_headers, "sender")
     created = await _create_order(client, sender)
     response = await client.post(
         f"{ORDERS_URL}/{created['id']}/status-history",
@@ -314,11 +365,11 @@ async def test_sender_cannot_add_status(
 
 
 async def test_manager_cannot_cancel_order(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    admin = await _admin(client, bearer_headers)
-    manager_id, manager = await _user(client, bearer_headers, "manager")
-    _, sender = await _user(client, bearer_headers, "sender")
+    admin = await _admin(session, client, bearer_headers)
+    manager_id, manager = await _user(session, client, bearer_headers, "manager")
+    _, sender = await _user(session, client, bearer_headers, "sender")
     created = await _create_order(client, sender)
     await client.put(
         f"{ORDERS_URL}/{created['id']}/operation",
@@ -330,10 +381,10 @@ async def test_manager_cannot_cancel_order(
 
 
 async def test_admin_cancels_order_idempotently(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
-    admin = await _admin(client, bearer_headers)
-    _, sender = await _user(client, bearer_headers, "sender")
+    admin = await _admin(session, client, bearer_headers)
+    _, sender = await _user(session, client, bearer_headers, "sender")
     created = await _create_order(client, sender)
     first: Response = await client.delete(
         f"{ORDERS_URL}/{created['id']}", headers=admin
@@ -353,12 +404,53 @@ async def test_admin_cancels_order_idempotently(
 
 
 async def test_admin_operator_role_is_also_admin(
-    client: AsyncClient, bearer_headers: BearerHeaders
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
 ) -> None:
     _, operator = await _user(
-        client, bearer_headers, "operator", role=ADMIN_OPERATOR_ROLE_ID
+        session,
+        client,
+        bearer_headers,
+        "operator",
+        role=ADMIN_OPERATOR_ROLE_ID,
+        organization_id=None,
     )
-    _, sender = await _user(client, bearer_headers, "sender")
+    _, sender = await _user(session, client, bearer_headers, "sender")
     created = await _create_order(client, sender)
     response = await client.delete(f"{ORDERS_URL}/{created['id']}", headers=operator)
     assert response.status_code == 204
+
+
+# --- list filter by user ----------------------------------------------------------
+
+
+async def test_admin_filters_list_by_user_id(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
+) -> None:
+    member_id, member = await _user(session, client, bearer_headers, "member")
+    await _create_order(client, member)
+    admin = await _admin(session, client, bearer_headers)
+
+    response = await client.get(f"{ORDERS_URL}?user_id={member_id}", headers=admin)
+
+    assert response.status_code == 200
+    assert response.headers["X-Total-Count"] == "1"
+
+
+async def test_non_admin_cannot_list_another_users_orders(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
+) -> None:
+    other_id, _ = await _user(session, client, bearer_headers, "other")
+    _, viewer = await _user(session, client, bearer_headers, "viewer")
+
+    response = await client.get(f"{ORDERS_URL}?user_id={other_id}", headers=viewer)
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": FORBIDDEN_DETAIL}
+
+
+async def test_list_rejects_malformed_user_id(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
+) -> None:
+    admin = await _admin(session, client, bearer_headers)
+    response = await client.get(f"{ORDERS_URL}?user_id=not-a-uuid", headers=admin)
+    assert response.status_code == 422

@@ -22,7 +22,7 @@ from app.funcs.user_session import (
 )
 from app.schema.user import UserCreate
 from app.utils.exception import SessionInvalidError, SessionRetryError
-from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
+from tests.seed import TEST_ROLE_ID
 
 PASSWORD = "password123"
 NOW = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
@@ -32,9 +32,7 @@ GRACE_SECONDS = settings.REFRESH_TOKEN_REUSE_GRACE_SECONDS
 
 async def _user_id(session: AsyncSession, name: str = "alice") -> uuid.UUID:
     user = await User(session).create(
-        UserCreate(
-            role=TEST_ROLE_ID, organization_id=TEST_ORG_ID, name=name, password=PASSWORD
-        )
+        UserCreate(role=TEST_ROLE_ID, name=name, password=PASSWORD)
     )
     return user.id
 
@@ -395,7 +393,6 @@ async def test_rotate_inactive_user_revokes_session_with_user_inactive_reason(
     user = await User(session).create(
         UserCreate(
             role=TEST_ROLE_ID,
-            organization_id=TEST_ORG_ID,
             name="alice",
             password=PASSWORD,
         )
@@ -566,7 +563,6 @@ async def test_get_active_user_inactive_user_raises_invalid(
     user = await User(session).create(
         UserCreate(
             role=TEST_ROLE_ID,
-            organization_id=TEST_ORG_ID,
             name="alice",
             password=PASSWORD,
         )

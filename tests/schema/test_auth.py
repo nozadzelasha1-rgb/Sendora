@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from app.schema.auth import LogoutRequest, RefreshRequest, TokenResponse, TokenUser
 from app.schema.user import UserRead
-from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
+from tests.seed import TEST_ROLE_ID
 
 
 def _user_read() -> UserRead:
@@ -13,8 +13,6 @@ def _user_read() -> UserRead:
         id=uuid.uuid4(),
         name="alice",
         role=TEST_ROLE_ID,
-        organization_id=TEST_ORG_ID,
-        zone_id=None,
         active=True,
         phone=None,
         email="alice@example.com",

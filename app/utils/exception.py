@@ -3,7 +3,7 @@ class UserAlreadyExistsError(Exception):
 
 
 class InvalidReferenceError(Exception):
-    """The role or organization referenced by the user does not exist."""
+    """The role referenced by the user does not exist."""
 
 
 class UserNotFoundError(Exception):
@@ -51,7 +51,7 @@ class ZoneNotFoundError(Exception):
 
 
 class InvalidZoneReferenceError(Exception):
-    """A status, assignment rule or manager referenced by the zone does not exist."""
+    """A status or assignment rule referenced by the zone does not exist."""
 
 
 class NoDataError(Exception):
@@ -66,9 +66,21 @@ class OrderForbiddenError(Exception):
     """The requesting user may not perform this action on the order."""
 
 
+class OrganizationChoiceRequiredError(Exception):
+    """The order needs an explicit organization: the user has several, or is an admin."""
+
+
 class InvalidOrderReferenceError(Exception):
     """A dictionary, zone, organization or user referenced by the order does not exist."""
 
 
 class OrderConflictError(Exception):
-    """An order with the same external_order_id already exists for the partner."""
+    """The order cannot be stored because of a conflict, e.g. no free tracking number."""
+
+
+class MembershipAlreadyExistsError(Exception):
+    """The user is already a member of the organization or zone."""
+
+
+class MembershipNotFoundError(Exception):
+    """The user is not a member of the organization or zone."""

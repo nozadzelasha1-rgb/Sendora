@@ -46,7 +46,7 @@ class User:
         """Create a user.
 
         Raise UserAlreadyExistsError on a duplicate identifier and
-        InvalidReferenceError when the role or organization does not exist.
+        InvalidReferenceError when the role does not exist.
         """
         conditions: list[ColumnElement[bool]] = [UserDB.name == data.name]
         if data.phone is not None:
@@ -62,8 +62,6 @@ class User:
         user = UserDB(
             name=data.name,
             role=data.role,
-            organization_id=data.organization_id,
-            zone_id=data.zone_id,
             phone=data.phone,
             email=data.email,
             password_hash=await self.hash_password(data.password.get_secret_value()),
@@ -77,7 +75,7 @@ class User:
             if sqlstate == _SQLSTATE_UNIQUE_VIOLATION:
                 raise UserAlreadyExistsError("User already exists") from exc
             if sqlstate == _SQLSTATE_FOREIGN_KEY_VIOLATION:
-                raise InvalidReferenceError("Unknown role or organization") from exc
+                raise InvalidReferenceError("Unknown role") from exc
             raise
         except SQLAlchemyError:
             await self.session.rollback()

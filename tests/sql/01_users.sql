@@ -16,8 +16,6 @@ CREATE TABLE dbo.organizations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL,
     type bigint NOT NULL REFERENCES dbo.dictionary(id),
-    contact text,
-    phone varchar(20),
     delivery_fee_gel numeric(12,2),
     active boolean NOT NULL DEFAULT true
 );
@@ -27,7 +25,6 @@ CREATE TABLE dbo.zones (
     name text NOT NULL,
     city text NOT NULL,
     boundary jsonb,
-    manager_id uuid,
     assignment_rule bigint REFERENCES dbo.dictionary(id),
     status bigint NOT NULL REFERENCES dbo.dictionary(id)
 );
@@ -36,13 +33,22 @@ CREATE TABLE dbo.users (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL UNIQUE,
     role bigint NOT NULL REFERENCES dbo.dictionary(id),
-    organization_id uuid NOT NULL REFERENCES dbo.organizations(id),
-    zone_id uuid REFERENCES dbo.zones(id),
     active boolean NOT NULL DEFAULT true,
     email varchar(255) UNIQUE,
     phone varchar(20) UNIQUE,
     password_hash text
 );
 
-ALTER TABLE dbo.zones
-    ADD CONSTRAINT zones_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES dbo.users(id);
+CREATE TABLE dbo.organizations_users (
+    organization_id uuid NOT NULL REFERENCES dbo.organizations(id),
+    user_id uuid NOT NULL REFERENCES dbo.users(id) ON DELETE CASCADE,
+    PRIMARY KEY (organization_id, user_id)
+);
+CREATE INDEX organizations_users_user_id_idx ON dbo.organizations_users (user_id);
+
+CREATE TABLE dbo.zones_users (
+    zone_id uuid NOT NULL REFERENCES dbo.zones(id),
+    user_id uuid NOT NULL REFERENCES dbo.users(id) ON DELETE CASCADE,
+    PRIMARY KEY (zone_id, user_id)
+);
+CREATE INDEX zones_users_user_id_idx ON dbo.zones_users (user_id);

@@ -9,10 +9,10 @@ from app.db_entities.orders import (
     OrderSenderDB,
     OrderStatusHistoryDB,
 )
-from app.db_entities.organizations import OrganizationDB
+from app.db_entities.organizations import OrganizationDB, OrganizationUserDB
 from app.db_entities.users.user import UserDB
 from app.db_entities.users.user_session import UserSessionDB
-from app.db_entities.zones import ZoneDB
+from app.db_entities.zones import ZoneDB, ZoneUserDB
 
 __all__ = [
     "DictionaryDB",
@@ -26,7 +26,9 @@ __all__ = [
     "OrderSenderDB",
     "OrderStatusHistoryDB",
     "OrganizationDB",
+    "OrganizationUserDB",
     "UserDB",
     "UserSessionDB",
     "ZoneDB",
+    "ZoneUserDB",
 ]

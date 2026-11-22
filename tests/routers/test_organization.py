@@ -7,7 +7,7 @@ from httpx import AsyncClient, Response
 
 from app.core import settings
 from app.utils.constant import ADMIN_OPERATOR_ROLE_ID, SUPER_ADMIN_ROLE_ID
-from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
+from tests.seed import TEST_ROLE_ID
 
 USERS_URL = f"{settings.API_PREFIX}/users"
 ORGS_URL = f"{settings.API_PREFIX}/organizations"
@@ -23,13 +23,7 @@ async def _login_with_role(
     client: AsyncClient, bearer_headers: BearerHeaders, name: str, role: int
 ) -> dict[str, str]:
     response = await client.post(
-        USERS_URL,
-        json={
-            "name": name,
-            "password": PASSWORD,
-            "role": role,
-            "organization_id": str(TEST_ORG_ID),
-        },
+        USERS_URL, json={"name": name, "password": PASSWORD, "role": role}
     )
     assert response.status_code == 201, response.text
     return await bearer_headers(name)
@@ -65,6 +59,8 @@ _ENDPOINTS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("GET", f"{ORGS_URL}/{_SOME_ID}", None),
     ("PATCH", f"{ORGS_URL}/{_SOME_ID}", {"name": "New"}),
     ("DELETE", f"{ORGS_URL}/{_SOME_ID}", None),
+    ("POST", f"{ORGS_URL}/{_SOME_ID}/users", {"user_id": _SOME_ID}),
+    ("DELETE", f"{ORGS_URL}/{_SOME_ID}/users/{_SOME_ID}", None),
 ]
 
 
@@ -139,8 +135,6 @@ async def test_create_returns_201_with_organization(
         json={
             "name": "  Acme  ",
             "type": TEST_ROLE_ID,
-            "contact": "Bob",
-            "phone": "555",
             "delivery_fee_gel": "4.50",
         },
         headers=headers,
@@ -151,8 +145,8 @@ async def test_create_returns_201_with_organization(
     assert uuid.UUID(body["id"])
     assert body["name"] == "Acme"
     assert body["type"] == TEST_ROLE_ID
-    assert body["contact"] == "Bob"
-    assert body["phone"] == "555"
+    assert "contact" not in body
+    assert "phone" not in body
     assert float(body["delivery_fee_gel"]) == 4.5
     assert body["active"] is True
 
@@ -163,7 +157,6 @@ async def test_create_returns_201_with_organization(
         {"type": TEST_ROLE_ID},
         {"name": "Acme"},
         {"name": "", "type": TEST_ROLE_ID},
-        {"name": "Acme", "type": TEST_ROLE_ID, "phone": "1" * 21},
         {"name": "Acme", "type": TEST_ROLE_ID, "delivery_fee_gel": "-1"},
         {"name": "Acme", "type": TEST_ROLE_ID, "delivery_fee_gel": "1.234"},
     ],
@@ -278,7 +271,7 @@ async def test_patch_changes_only_sent_fields(
     client: AsyncClient, bearer_headers: BearerHeaders
 ) -> None:
     headers = await _auth(client, bearer_headers)
-    created = await _create_org(client, headers, contact="Bob", phone="555")
+    created = await _create_org(client, headers, delivery_fee_gel="4.50")
 
     response = await client.patch(
         f"{ORGS_URL}/{created['id']}", json={"name": "Renamed"}, headers=headers
@@ -287,8 +280,7 @@ async def test_patch_changes_only_sent_fields(
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "Renamed"
-    assert body["contact"] == "Bob"
-    assert body["phone"] == "555"
+    assert float(body["delivery_fee_gel"]) == 4.5
     assert body["id"] == created["id"]
 
 
@@ -408,3 +400,87 @@ async def test_patch_reactivates_deleted_organization(
 
     assert response.status_code == 200
     assert response.json()["active"] is True
+
+
+# --- organization membership ----------------------------------------------------------
+
+
+async def _new_user_id(client: AsyncClient, headers: dict[str, str], name: str) -> str:
+    response = await client.post(
+        USERS_URL,
+        json={"name": name, "password": PASSWORD, "role": TEST_ROLE_ID},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    user_id: str = response.json()["id"]
+    return user_id
+
+
+async def test_admin_adds_and_removes_organization_member(
+    client: AsyncClient, bearer_headers: BearerHeaders
+) -> None:
+    headers = await _auth(client, bearer_headers)
+    org = await _create_org(client, headers)
+    user_id = await _new_user_id(client, headers, "member")
+    url = f"{ORGS_URL}/{org['id']}/users"
+
+    added = await client.post(url, json={"user_id": user_id}, headers=headers)
+    assert added.status_code == 201, added.text
+    assert added.json() == {"organization_id": org["id"], "user_id": user_id}
+
+    removed = await client.delete(f"{url}/{user_id}", headers=headers)
+    assert removed.status_code == 204
+
+    again = await client.delete(f"{url}/{user_id}", headers=headers)
+    assert again.status_code == 404
+    assert again.json() == {"detail": "User is not a member of the organization"}
+
+
+async def test_adding_same_organization_member_twice_returns_409(
+    client: AsyncClient, bearer_headers: BearerHeaders
+) -> None:
+    headers = await _auth(client, bearer_headers)
+    org = await _create_org(client, headers)
+    user_id = await _new_user_id(client, headers, "member")
+    url = f"{ORGS_URL}/{org['id']}/users"
+    await client.post(url, json={"user_id": user_id}, headers=headers)
+
+    response = await client.post(url, json={"user_id": user_id}, headers=headers)
+
+    assert response.status_code == 409
+
+
+async def test_adding_to_unknown_organization_or_user_returns_404(
+    client: AsyncClient, bearer_headers: BearerHeaders
+) -> None:
+    headers = await _auth(client, bearer_headers)
+    org = await _create_org(client, headers)
+    user_id = await _new_user_id(client, headers, "member")
+
+    unknown_org = await client.post(
+        f"{ORGS_URL}/{_SOME_ID}/users", json={"user_id": user_id}, headers=headers
+    )
+    assert unknown_org.status_code == 404
+    assert unknown_org.json() == {"detail": "Organization not found"}
+
+    unknown_user = await client.post(
+        f"{ORGS_URL}/{org['id']}/users", json={"user_id": _SOME_ID}, headers=headers
+    )
+    assert unknown_user.status_code == 404
+    assert unknown_user.json() == {"detail": "User not found"}
+
+
+async def test_ordinary_user_cannot_change_organization_members(
+    client: AsyncClient, bearer_headers: BearerHeaders
+) -> None:
+    admin = await _auth(client, bearer_headers)
+    org = await _create_org(client, admin)
+    user_headers = await _login_with_role(client, bearer_headers, "bob", TEST_ROLE_ID)
+    user_id = await _new_user_id(client, admin, "carol")
+
+    response = await client.post(
+        f"{ORGS_URL}/{org['id']}/users", json={"user_id": user_id}, headers=user_headers
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": FORBIDDEN_DETAIL}

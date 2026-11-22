@@ -23,7 +23,6 @@ class ZoneCreate(BaseModel):
     name: str
     city: str
     boundary: Any | None = None
-    manager_id: uuid.UUID | None = None
     assignment_rule: int | None = None
     status: int
 
@@ -44,7 +43,6 @@ class ZoneUpdate(BaseModel):
     name: str | None = None
     city: str | None = None
     boundary: Any | None = None
-    manager_id: uuid.UUID | None = None
     assignment_rule: int | None = None
     status: int | None = None
 
@@ -81,6 +79,18 @@ class ZoneRead(BaseModel):
     name: str
     city: str
     boundary: Any | None
-    manager_id: uuid.UUID | None
     assignment_rule: int | None
     status: int
+
+
+class ZoneMemberCreate(BaseModel):
+    """Payload for adding a user to a zone."""
+
+    user_id: uuid.UUID
+
+
+class ZoneMemberRead(BaseModel):
+    """A user's membership in a zone."""
+
+    zone_id: uuid.UUID
+    user_id: uuid.UUID

@@ -18,8 +18,6 @@ Table dbo.organizations {
   id uuid [pk, default: `gen_random_uuid()`]
   name text [not null]
   type bigint [not null, ref: > dbo.dictionary.id, note: 'dictionary: organization_type']
-  contact text
-  phone varchar(20)
   delivery_fee_gel numeric(12,2)
   active boolean [not null, default: true]
 
@@ -30,8 +28,6 @@ Table dbo.users {
   id uuid [pk, default: `gen_random_uuid()`]
   name text [not null, unique] 
   role bigint [not null, ref: > dbo.dictionary.id, note: 'dictionary: user_role']
-  organization_id uuid [not null, ref: > dbo.organizations.id]
-  zone_id uuid [ref: > dbo.zones.id]
   active boolean [not null, default: true]
   email varchar(255) [unique]
   phone varchar(20) [unique]
@@ -57,23 +53,35 @@ Table dbo.user_sessions {
 
 Ref: dbo.user_sessions.user_id > dbo.users.id [delete: cascade]
 
+Table dbo.organizations_users {
+  organization_id uuid [pk, ref: > dbo.organizations.id]
+  user_id uuid [pk, ref: > dbo.users.id, note: 'удаляється разом з користувачем']
+
+  Note: '''Членство користувача в організації; користувач може належати кільком організаціям'''
+}
+
 Table dbo.zones {
   id uuid [pk, default: `gen_random_uuid()`]
   name text [not null]
   city text [not null]
   boundary jsonb [note: 'межі / полігон зони']
-  manager_id uuid [ref: > dbo.users.id]
   assignment_rule bigint [ref: > dbo.dictionary.id, note: 'dictionary: zone_assignment_rule']
   status bigint [not null, ref: > dbo.dictionary.id, note: 'dictionary: zone_status']
 
   Note: '''Аркуш Delivery Zones'''
 }
 
+Table dbo.zones_users {
+  zone_id uuid [pk, ref: > dbo.zones.id]
+  user_id uuid [pk, ref: > dbo.users.id, note: 'удаляється разом з користувачем']
+
+  Note: '''Членство користувача в зонах'''
+}
+
 Table dbo.orders {
   id bigint [pk, increment]
-  tracking_number text [not null, unique, note: 'SD-YYYY-NNNNNN, генерується системою']
-  external_order_id text
-  partner_id uuid [not null, ref: > dbo.organizations.id]
+  tracking_number text [not null, unique, note: 'SND-XXXX-XXXX-C, генерується системою']
+  organization_id uuid [not null, ref: > dbo.organizations.id]
   service_type bigint [not null, ref: > dbo.dictionary.id, note: 'dictionary: service_type']
   zone_id uuid [ref: > dbo.zones.id]
   courier_id uuid [ref: > dbo.users.id]
@@ -84,10 +92,6 @@ Table dbo.orders {
   delivered_at timestamptz
 
   Note: '''Ядро замовлення: ідентифікація, статус і ключі фільтрації списків'''
-
- indexes {
-    (partner_id, external_order_id) [unique]
-  }
 }
 
 Table dbo.order_status_history {
