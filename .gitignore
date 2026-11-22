@@ -120,3 +120,6 @@ docker-compose.override.yml
 .DS_Store
 Thumbs.db
 desktop.ini.codegraph/
+
+# Local database schema dump (not versioned)
+/db/*.sql
