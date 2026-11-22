@@ -22,7 +22,7 @@ from app.utils.exception import (
     TokenExpiredError,
     UserNotFoundError,
 )
-from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
+from tests.seed import TEST_ROLE_ID
 
 PASSWORD = "password123"
 CLAIM_KEYS = {"sub", "name", "sid", "type", "iat", "exp", "jti"}
@@ -30,9 +30,7 @@ CLAIM_KEYS = {"sub", "name", "sid", "type", "iat", "exp", "jti"}
 
 async def _make(session: AsyncSession, name: str = "alice") -> UserDB:
     return await User(session).create(
-        UserCreate(
-            role=TEST_ROLE_ID, organization_id=TEST_ORG_ID, name=name, password=PASSWORD
-        )
+        UserCreate(role=TEST_ROLE_ID, name=name, password=PASSWORD)
     )
 
 
@@ -115,7 +113,6 @@ async def test_create_access_token_exposes_no_secret_or_personal_data(
     user = await User(session).create(
         UserCreate(
             role=TEST_ROLE_ID,
-            organization_id=TEST_ORG_ID,
             name="alice",
             password=PASSWORD,
             phone="+79991234567",

@@ -7,7 +7,6 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Numeric,
-    String,
     Text,
     text,
 )
@@ -24,7 +23,21 @@ class OrganizationDB(Base):
     )
     name: Mapped[str] = mapped_column(Text)
     type: Mapped[int] = mapped_column(BigInteger, ForeignKey("dbo.dictionary.id"))
-    contact: Mapped[str | None] = mapped_column(Text)
-    phone: Mapped[str | None] = mapped_column(String(20))
     delivery_fee_gel: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+
+
+class OrganizationUserDB(Base):
+    """Membership of a user in an organization."""
+
+    __tablename__ = "organizations_users"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("dbo.organizations.id"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dbo.users.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )

@@ -13,7 +13,7 @@ from app.funcs.user import User
 from app.funcs.user_session import REASON_REUSE, UserSession
 from app.schema.user import UserCreate
 from app.utils.exception import SessionRetryError
-from tests.seed import TEST_ORG_ID, TEST_ROLE_ID, seed_references
+from tests.seed import TEST_ROLE_ID, seed_references
 
 PASSWORD = "password123"
 NOW = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
@@ -35,7 +35,6 @@ async def committed_session(
         user = await User(setup).create(
             UserCreate(
                 role=TEST_ROLE_ID,
-                organization_id=TEST_ORG_ID,
                 name=name,
                 password=PASSWORD,
             )

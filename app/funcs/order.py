@@ -18,7 +18,7 @@ from app.db_entities.orders import (
     OrderSenderDB,
     OrderStatusHistoryDB,
 )
-from app.db_entities.users.user import UserDB
+from app.db_entities.organizations import OrganizationUserDB
 from app.schema.order import (
     OperationUpsert,
     OrderCreate,
@@ -36,11 +36,14 @@ from app.utils.exception import (
     OrderConflictError,
     OrderForbiddenError,
     OrderNotFoundError,
+    OrganizationChoiceRequiredError,
 )
 from app.utils.tracking import generate_tracking_number
 
 _SQLSTATE_FOREIGN_KEY_VIOLATION = "23503"
 _SQLSTATE_UNIQUE_VIOLATION = "23505"
+_CHOOSE_ORGANIZATION_MESSAGE = "Choose the organization the order is created for"
+_NOT_A_MEMBER_MESSAGE = "User is not a member of any organization"
 _TRACKING_CONSTRAINT_MARKER = "tracking_number"
 _TRACKING_ATTEMPTS = 3
 _CANCEL_COMMENT = "Cancelled"
@@ -58,7 +61,8 @@ class OrderFilter:
 
     status: int | None = None
     zone_id: uuid.UUID | None = None
-    partner_id: uuid.UUID | None = None
+    organization_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
     courier_id: uuid.UUID | None = None
     manager_id: uuid.UUID | None = None
     created_from: datetime | None = None
@@ -84,10 +88,10 @@ def _translate(exc: IntegrityError) -> Exception | None:
     sqlstate = getattr(exc.orig, "sqlstate", None)
     if sqlstate == _SQLSTATE_FOREIGN_KEY_VIOLATION:
         return InvalidOrderReferenceError("Unknown order reference")
-    if sqlstate == _SQLSTATE_UNIQUE_VIOLATION:
-        if _TRACKING_CONSTRAINT_MARKER in str(exc.orig):
-            return _TrackingNumberConflictError()
-        return OrderConflictError("Order with this external_order_id already exists")
+    if sqlstate == _SQLSTATE_UNIQUE_VIOLATION and (
+        _TRACKING_CONSTRAINT_MARKER in str(exc.orig)
+    ):
+        return _TrackingNumberConflictError()
     return None
 
 
@@ -117,13 +121,19 @@ class Order:
         return cls.is_admin(user) or cls.is_manager(detail, user)
 
     @staticmethod
+    def _organizations_of(user_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
+        """Subquery with the ids of the organizations the user is a member of."""
+        return select(OrganizationUserDB.organization_id).where(
+            OrganizationUserDB.user_id == user_id
+        )
+
+    @staticmethod
     def _visible_to(user: UserRead) -> ColumnElement[bool]:
-        """Non-admin visibility: own organization as sender, assigned manager, courier or recipient."""
+        """Non-admin visibility: orders of the user's organizations, plus assigned manager or courier."""
         return or_(
-            OrderDB.partner_id == user.organization_id,
+            OrderDB.organization_id.in_(Order._organizations_of(user.id)),
             OrderOperationDB.manager_id == user.id,
             OrderDB.courier_id == user.id,
-            OrderRecipientDB.user_id == user.id,
         )
 
     # --- reads ------------------------------------------------------------------
@@ -177,10 +187,8 @@ class Order:
 
     def _filtered(self, user: UserRead, flt: OrderFilter) -> Select[tuple[OrderDB]]:
         """Light query for lists: orders table plus the two 1:1 joins the visibility needs."""
-        query = (
-            select(OrderDB)
-            .outerjoin(OrderOperationDB, OrderOperationDB.order_id == OrderDB.id)
-            .outerjoin(OrderRecipientDB, OrderRecipientDB.order_id == OrderDB.id)
+        query = select(OrderDB).outerjoin(
+            OrderOperationDB, OrderOperationDB.order_id == OrderDB.id
         )
         conditions: list[ColumnElement[bool]] = []
         if not self.is_admin(user):
@@ -189,8 +197,12 @@ class Order:
             conditions.append(OrderDB.status == flt.status)
         if flt.zone_id is not None:
             conditions.append(OrderDB.zone_id == flt.zone_id)
-        if flt.partner_id is not None:
-            conditions.append(OrderDB.partner_id == flt.partner_id)
+        if flt.organization_id is not None:
+            conditions.append(OrderDB.organization_id == flt.organization_id)
+        if flt.user_id is not None:
+            conditions.append(
+                OrderDB.organization_id.in_(self._organizations_of(flt.user_id))
+            )
         if flt.courier_id is not None:
             conditions.append(OrderDB.courier_id == flt.courier_id)
         if flt.manager_id is not None:
@@ -212,9 +224,19 @@ class Order:
     ) -> tuple[Sequence[Row[Any]], int]:
         """Return one page of (order, manager_id, total) rows and the total count.
 
+        Non-admins may filter only by their own user_id; admins may use any user_id.
+
         The total comes from a window count in the same query. When the page is
         empty, a separate count is run so the total stays correct.
         """
+        if (
+            flt.user_id is not None
+            and not self.is_admin(user)
+            and flt.user_id != user.id
+        ):
+            raise OrderForbiddenError(
+                "Users can only filter orders by their own user_id"
+            )
         base = self._filtered(user, flt)
         page_query = (
             base.add_columns(
@@ -251,36 +273,50 @@ class Order:
             raise
         return result
 
-    async def _user_id_by_phone(self, phone: str) -> uuid.UUID | None:
-        """Return the active user with exactly this phone, if one exists (phone is unique)."""
+    async def _member_organization_ids(self, user_id: uuid.UUID) -> Sequence[uuid.UUID]:
         result = await self.session.execute(
-            select(UserDB.id).where(UserDB.phone == phone, UserDB.active.is_(True))
-        )
-        return result.scalar_one_or_none()
-
-    @staticmethod
-    def _resolve_partner(data: OrderCreate, user: UserRead) -> uuid.UUID:
-        if Order.is_admin(user):
-            if data.partner_id is None:
-                raise InvalidOrderReferenceError("partner_id is required for admins")
-            return data.partner_id
-        if data.partner_id is not None and data.partner_id != user.organization_id:
-            raise OrderForbiddenError(
-                "Orders can only be created for your organization"
+            select(OrganizationUserDB.organization_id).where(
+                OrganizationUserDB.user_id == user_id
             )
-        return user.organization_id
+        )
+        return list(result.scalars().all())
+
+    async def _resolve_organization(
+        self, data: OrderCreate, user: UserRead
+    ) -> uuid.UUID:
+        """Pick the organization that owns the new order.
+
+        Admins must always name one. Other users must belong to at least one
+        organization; a user of several organizations must name one of them.
+        Raise OrganizationChoiceRequiredError when the choice is missing and
+        OrderForbiddenError when the user has no organization or names a foreign one.
+        """
+        if self.is_admin(user):
+            if data.organization_id is None:
+                raise OrganizationChoiceRequiredError(_CHOOSE_ORGANIZATION_MESSAGE)
+            return data.organization_id
+        member_of = await self._member_organization_ids(user.id)
+        if not member_of:
+            raise OrderForbiddenError(_NOT_A_MEMBER_MESSAGE)
+        if data.organization_id is not None:
+            if data.organization_id not in member_of:
+                raise OrderForbiddenError(
+                    "Orders can only be created for your organizations"
+                )
+            return data.organization_id
+        if len(member_of) > 1:
+            raise OrganizationChoiceRequiredError(_CHOOSE_ORGANIZATION_MESSAGE)
+        return member_of[0]
 
     async def _insert_order(
         self,
         data: OrderCreate,
         user: UserRead,
-        partner_id: uuid.UUID,
-        recipient_user_id: uuid.UUID | None,
+        organization_id: uuid.UUID,
     ) -> int:
         order = OrderDB(
             tracking_number=generate_tracking_number(),
-            external_order_id=data.external_order_id,
-            partner_id=partner_id,
+            organization_id=organization_id,
             service_type=data.service_type,
             zone_id=data.zone_id,
             status=ORDER_STATUS_CREATED_ID,
@@ -291,11 +327,7 @@ class Order:
         self.session.add_all(
             [
                 OrderSenderDB(order_id=order_id, **data.sender.model_dump()),
-                OrderRecipientDB(
-                    order_id=order_id,
-                    **data.recipient.model_dump(exclude={"user_id"}),
-                    user_id=recipient_user_id,
-                ),
+                OrderRecipientDB(order_id=order_id, **data.recipient.model_dump()),
                 OrderParcelDB(order_id=order_id, **data.parcel.model_dump()),
                 OrderScheduleDB(order_id=order_id, **data.schedule.model_dump()),
                 OrderPaymentDB(order_id=order_id, **data.payment.model_dump()),
@@ -313,18 +345,11 @@ class Order:
 
         The tracking number is generated by the server and retried on collision.
         """
-        partner_id = self._resolve_partner(data, user)
-        recipient_user_id = data.recipient.user_id
-        if recipient_user_id is None:
-            recipient_user_id = await self._user_id_by_phone(
-                data.recipient.recipient_phone
-            )
+        organization_id = await self._resolve_organization(data, user)
         for _ in range(_TRACKING_ATTEMPTS):
             try:
                 order_id = await self._run(
-                    lambda: self._insert_order(
-                        data, user, partner_id, recipient_user_id
-                    )
+                    lambda: self._insert_order(data, user, organization_id)
                 )
             except _TrackingNumberConflictError:
                 continue
@@ -339,8 +364,9 @@ class Order:
         detail = await self.get(order_id, user)
         privileged = self.is_admin(user) or self.is_manager(detail, user)
         if not privileged:
+            member_of = await self._member_organization_ids(user.id)
             sender_can_edit = (
-                detail.order.partner_id == user.organization_id
+                detail.order.organization_id in member_of
                 and detail.order.status == ORDER_STATUS_CREATED_ID
             )
             if not sender_can_edit:
@@ -368,12 +394,6 @@ class Order:
                 if name not in changes:
                     continue
                 values = changes[name].model_dump()
-                if name == "recipient":
-                    values["user_id"] = changes[
-                        name
-                    ].user_id or await self._user_id_by_phone(
-                        changes[name].recipient_phone
-                    )
                 block = getattr(detail, name)
                 if block is None:
                     block = model_cls(order_id=order_id)

@@ -8,11 +8,19 @@ from app.funcs.organization import Organization
 from app.routers.dependencies import FORBIDDEN_DETAIL, require_roles
 from app.schema.organization import (
     OrganizationCreate,
+    OrganizationMemberCreate,
+    OrganizationMemberRead,
     OrganizationRead,
     OrganizationUpdate,
 )
 from app.utils.constant import ADMIN_OPERATOR_ROLE_ID, SUPER_ADMIN_ROLE_ID
-from app.utils.exception import InvalidOrganizationTypeError, OrganizationNotFoundError
+from app.utils.exception import (
+    InvalidOrganizationTypeError,
+    MembershipAlreadyExistsError,
+    MembershipNotFoundError,
+    OrganizationNotFoundError,
+    UserNotFoundError,
+)
 
 ORGANIZATION_ALLOWED_ROLE_IDS = (SUPER_ADMIN_ROLE_ID, ADMIN_OPERATOR_ROLE_ID)
 
@@ -29,6 +37,9 @@ _UNAUTHORIZED_RESPONSE = {
     "description": "Invalid or expired authentication credentials"
 }
 _NOT_FOUND_RESPONSE = {"description": _NOT_FOUND_DETAIL}
+_USER_NOT_FOUND_DETAIL = "User not found"
+_NOT_A_MEMBER_DETAIL = "User is not a member of the organization"
+_ALREADY_MEMBER_DETAIL = "User is already a member of the organization"
 
 
 @router.post(
@@ -171,5 +182,68 @@ async def delete_organization(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=_NOT_FOUND_DETAIL,
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{organization_id}/users",
+    response_model=OrganizationMemberRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a user to an organization",
+    description="Make an active user a member of the organization.",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED_RESPONSE,
+        status.HTTP_404_NOT_FOUND: {
+            "description": f"{_NOT_FOUND_DETAIL} or {_USER_NOT_FOUND_DETAIL}"
+        },
+        status.HTTP_409_CONFLICT: {"description": _ALREADY_MEMBER_DETAIL},
+    },
+)
+async def add_organization_user(
+    organization_id: uuid.UUID,
+    data: OrganizationMemberCreate,
+    session: AsyncSession = Depends(get_session),
+) -> OrganizationMemberRead:
+    try:
+        await Organization(session).add_user(organization_id, data.user_id)
+    except OrganizationNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_NOT_FOUND_DETAIL,
+        )
+    except UserNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_USER_NOT_FOUND_DETAIL,
+        )
+    except MembershipAlreadyExistsError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_ALREADY_MEMBER_DETAIL,
+        )
+    return OrganizationMemberRead(organization_id=organization_id, user_id=data.user_id)
+
+
+@router.delete(
+    "/{organization_id}/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a user from an organization",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED_RESPONSE,
+        status.HTTP_404_NOT_FOUND: {"description": _NOT_A_MEMBER_DETAIL},
+    },
+)
+async def remove_organization_user(
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    try:
+        await Organization(session).remove_user(organization_id, user_id)
+    except MembershipNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_NOT_A_MEMBER_DETAIL,
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.schema.user import UserCreate, UserCredentials, UserRead
-from tests.seed import REF_PAYLOAD, TEST_ORG_ID, TEST_ROLE_ID
+from tests.seed import REF_PAYLOAD, TEST_ROLE_ID
 
 VALID_PASSWORD = "password123"
 
@@ -259,8 +259,6 @@ def test_user_read_from_orm_like_object_never_exposes_hash() -> None:
         id = uuid.uuid4()
         name = "alice"
         role = TEST_ROLE_ID
-        organization_id = TEST_ORG_ID
-        zone_id = None
         active = True
         phone = None
         email = "alice@example.com"

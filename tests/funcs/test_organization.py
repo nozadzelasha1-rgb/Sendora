@@ -2,12 +2,22 @@ import uuid
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db_entities.organizations import OrganizationDB
+from app.db_entities.organizations import OrganizationDB, OrganizationUserDB
+from app.db_entities.users.user import UserDB
 from app.funcs.organization import Organization
+from app.funcs.user import User
 from app.schema.organization import OrganizationCreate, OrganizationUpdate
-from app.utils.exception import InvalidOrganizationTypeError, OrganizationNotFoundError
+from app.schema.user import UserCreate
+from app.utils.exception import (
+    InvalidOrganizationTypeError,
+    MembershipAlreadyExistsError,
+    MembershipNotFoundError,
+    OrganizationNotFoundError,
+    UserNotFoundError,
+)
 from tests.seed import TEST_ROLE_ID
 
 UNKNOWN_TYPE = 987654
@@ -28,13 +38,11 @@ async def _make(
 
 
 async def test_create_persists_organization(session: AsyncSession) -> None:
-    org = await _make(session, contact="Bob", phone="555", delivery_fee_gel="4.50")
+    org = await _make(session, delivery_fee_gel="4.50")
 
     assert isinstance(org.id, uuid.UUID)
     assert org.name == "Acme"
     assert org.type == TEST_ROLE_ID
-    assert org.contact == "Bob"
-    assert org.phone == "555"
     assert org.delivery_fee_gel == Decimal("4.50")
     assert org.active is True
 
@@ -132,28 +140,26 @@ async def test_list_active_filter(session: AsyncSession) -> None:
 
 
 async def test_update_changes_only_sent_fields(session: AsyncSession) -> None:
-    org = await _make(session, contact="Bob", phone="555", delivery_fee_gel="4.50")
+    org = await _make(session, delivery_fee_gel="4.50")
 
     updated = await Organization(session).update(
         org.id, OrganizationUpdate(name="Renamed")
     )
 
     assert updated.name == "Renamed"
-    assert updated.contact == "Bob"
-    assert updated.phone == "555"
     assert updated.delivery_fee_gel == Decimal("4.50")
     assert updated.type == TEST_ROLE_ID
     assert updated.active is True
 
 
 async def test_update_can_clear_nullable_field(session: AsyncSession) -> None:
-    org = await _make(session, contact="Bob")
+    org = await _make(session, delivery_fee_gel="4.50")
 
     updated = await Organization(session).update(
-        org.id, OrganizationUpdate.model_validate({"contact": None})
+        org.id, OrganizationUpdate.model_validate({"delivery_fee_gel": None})
     )
 
-    assert updated.contact is None
+    assert updated.delivery_fee_gel is None
 
 
 async def test_update_can_reactivate(session: AsyncSession) -> None:
@@ -210,3 +216,98 @@ async def test_delete_twice_is_a_noop(session: AsyncSession) -> None:
 async def test_delete_missing_raises(session: AsyncSession) -> None:
     with pytest.raises(OrganizationNotFoundError):
         await Organization(session).delete(uuid.uuid4())
+
+
+# --- membership -----------------------------------------------------------------
+
+
+async def _user(session: AsyncSession) -> UserDB:
+    return await User(session).create(
+        UserCreate(
+            name=f"member-{uuid.uuid4().hex[:8]}",
+            password="password-123",
+            role=TEST_ROLE_ID,
+        )
+    )
+
+
+async def _membership_count(
+    session: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID
+) -> int:
+    result = await session.execute(
+        select(OrganizationUserDB).where(
+            OrganizationUserDB.organization_id == org_id,
+            OrganizationUserDB.user_id == user_id,
+        )
+    )
+    return len(result.scalars().all())
+
+
+async def test_add_user_creates_membership(session: AsyncSession) -> None:
+    org = await _make(session)
+    user = await _user(session)
+
+    await Organization(session).add_user(org.id, user.id)
+
+    assert await _membership_count(session, org.id, user.id) == 1
+
+
+async def test_add_user_twice_raises_already_exists(session: AsyncSession) -> None:
+    org = await _make(session)
+    user = await _user(session)
+    await Organization(session).add_user(org.id, user.id)
+
+    with pytest.raises(MembershipAlreadyExistsError):
+        await Organization(session).add_user(org.id, user.id)
+
+
+async def test_add_user_to_missing_organization_raises(session: AsyncSession) -> None:
+    user = await _user(session)
+
+    with pytest.raises(OrganizationNotFoundError):
+        await Organization(session).add_user(uuid.uuid4(), user.id)
+
+
+async def test_add_missing_user_raises(session: AsyncSession) -> None:
+    org = await _make(session)
+
+    with pytest.raises(UserNotFoundError):
+        await Organization(session).add_user(org.id, uuid.uuid4())
+
+
+async def test_add_inactive_user_raises(session: AsyncSession) -> None:
+    org = await _make(session)
+    user = await _user(session)
+    user.active = False
+    await session.flush()
+
+    with pytest.raises(UserNotFoundError):
+        await Organization(session).add_user(org.id, user.id)
+
+
+async def test_remove_user_deletes_membership(session: AsyncSession) -> None:
+    org = await _make(session)
+    user = await _user(session)
+    await Organization(session).add_user(org.id, user.id)
+
+    await Organization(session).remove_user(org.id, user.id)
+
+    assert await _membership_count(session, org.id, user.id) == 0
+
+
+async def test_remove_user_that_is_not_member_raises(session: AsyncSession) -> None:
+    org = await _make(session)
+    user = await _user(session)
+
+    with pytest.raises(MembershipNotFoundError):
+        await Organization(session).remove_user(org.id, user.id)
+
+
+async def test_deleting_user_removes_memberships(session: AsyncSession) -> None:
+    org = await _make(session)
+    user = await _user(session)
+    await Organization(session).add_user(org.id, user.id)
+
+    await User(session).delete(user.id)
+
+    assert await _membership_count(session, org.id, user.id) == 0

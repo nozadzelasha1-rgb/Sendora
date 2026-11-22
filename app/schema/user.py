@@ -57,8 +57,6 @@ class UserCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     password: SecretStr = Field(min_length=8, max_length=128)
     role: int
-    organization_id: uuid.UUID
-    zone_id: uuid.UUID | None = None
     phone: str | None = None
     email: str | None = None
 
@@ -122,8 +120,6 @@ class UserRead(BaseModel):
     id: uuid.UUID
     name: str
     role: int
-    organization_id: uuid.UUID
-    zone_id: uuid.UUID | None
     active: bool
     email: str | None
     phone: str | None

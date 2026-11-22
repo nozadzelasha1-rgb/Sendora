@@ -1,8 +1,7 @@
 CREATE TABLE dbo.orders (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tracking_number text NOT NULL UNIQUE,
-    external_order_id text,
-    partner_id uuid NOT NULL REFERENCES dbo.organizations(id),
+    organization_id uuid NOT NULL REFERENCES dbo.organizations(id),
     service_type bigint NOT NULL REFERENCES dbo.dictionary(id),
     zone_id uuid REFERENCES dbo.zones(id),
     courier_id uuid REFERENCES dbo.users(id),
@@ -10,8 +9,7 @@ CREATE TABLE dbo.orders (
     tracking_url text,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    delivered_at timestamptz,
-    UNIQUE (partner_id, external_order_id)
+    delivered_at timestamptz
 );
 
 CREATE TABLE dbo.order_status_history (
@@ -45,8 +43,7 @@ CREATE TABLE dbo.order_recipients (
     floor text,
     apartment text,
     door_code text,
-    landmark text,
-    user_id uuid REFERENCES dbo.users(id)
+    landmark text
 );
 
 CREATE TABLE dbo.order_parcels (

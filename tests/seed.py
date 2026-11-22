@@ -20,7 +20,6 @@ TEST_ORG_ID = uuid.UUID("00000000-0000-4000-8000-000000009001")
 # Extra fields a test POST to /users needs to pass validation.
 REF_PAYLOAD: dict[str, Any] = {
     "role": TEST_ROLE_ID,
-    "organization_id": str(TEST_ORG_ID),
 }
 
 
