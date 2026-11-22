@@ -84,3 +84,15 @@ class MembershipAlreadyExistsError(Exception):
 
 class MembershipNotFoundError(Exception):
     """The user is not a member of the organization or zone."""
+
+
+class DictionarySpecNotFoundError(Exception):
+    """The dictionary spec does not exist."""
+
+
+class DictionaryItemNotFoundError(Exception):
+    """The dictionary item does not exist inside the given spec."""
+
+
+class DictionaryItemInUseError(Exception):
+    """The dictionary item is referenced by other records or is protected from deletion."""

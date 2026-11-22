@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.core import settings
+from app.routers.dictionary import router as dictionary_router
 from app.routers.order import router as order_router
 from app.routers.organization import router as organization_router
 from app.routers.user import router as user_router
@@ -25,3 +26,4 @@ app.include_router(user_router, prefix=settings.API_PREFIX)
 app.include_router(organization_router, prefix=settings.API_PREFIX)
 app.include_router(zone_router, prefix=settings.API_PREFIX)
 app.include_router(order_router, prefix=settings.API_PREFIX)
+app.include_router(dictionary_router, prefix=settings.API_PREFIX)
