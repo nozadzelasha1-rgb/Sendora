@@ -1,8 +1,8 @@
 from typing import Final
 
 # Role ids from dbo.dictionary (spec: role).
-SUPER_ADMIN_ROLE_ID: Final[int] = 28
-ADMIN_OPERATOR_ROLE_ID: Final[int] = 29
+SUPER_ADMIN_ROLE_ID: Final[int] = 27
+ADMIN_OPERATOR_ROLE_ID: Final[int] = 28
 
 # Roles that manage zones and see every zone.
 ZONE_ADMIN_ROLE_IDS: Final[tuple[int, ...]] = (
