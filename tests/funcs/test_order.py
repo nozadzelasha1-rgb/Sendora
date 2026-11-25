@@ -20,6 +20,7 @@ from app.utils.constant import (
     ADMIN_OPERATOR_ROLE_ID,
     ORDER_STATUS_CANCELLED_ID,
     ORDER_STATUS_CREATED_ID,
+    ORDER_STATUS_DELIVERED_ID,
     SUPER_ADMIN_ROLE_ID,
 )
 from app.utils.exception import (
@@ -489,3 +490,48 @@ async def test_non_admin_cannot_filter_by_another_user(session: AsyncSession) ->
 
     with pytest.raises(OrderForbiddenError):
         await Order(session).list(user, 50, 0, OrderFilter(user_id=other.id))
+
+
+# --- delivered_at and status ids ----------------------------------------------------
+
+
+async def test_create_writes_the_created_status_id(session: AsyncSession) -> None:
+    detail = await _create(session, await _user(session))
+    assert detail.order.status == ORDER_STATUS_CREATED_ID
+
+
+async def test_cancel_writes_the_cancelled_status_id(session: AsyncSession) -> None:
+    admin = await _user(session, role=SUPER_ADMIN_ROLE_ID)
+    detail = await _create(session, await _user(session))
+    await Order(session).cancel(detail.order.id, admin)
+    refreshed = await Order(session).get(detail.order.id, admin)
+    assert refreshed.order.status == ORDER_STATUS_CANCELLED_ID
+
+
+async def test_delivered_status_sets_delivered_at_and_reopen_clears_it(
+    session: AsyncSession,
+) -> None:
+    admin = await _user(session, role=SUPER_ADMIN_ROLE_ID)
+    detail = await _create(session, await _user(session))
+    await Order(session).add_status(
+        detail.order.id, StatusChangeCreate(status=ORDER_STATUS_DELIVERED_ID), admin
+    )
+    delivered = await Order(session).get(detail.order.id, admin)
+    assert delivered.order.delivered_at is not None
+
+    await Order(session).add_status(
+        detail.order.id, StatusChangeCreate(status=ORDER_STATUS_CREATED_ID), admin
+    )
+    reopened = await Order(session).get(detail.order.id, admin)
+    assert reopened.order.delivered_at is None
+
+
+async def test_cancel_clears_delivered_at(session: AsyncSession) -> None:
+    admin = await _user(session, role=SUPER_ADMIN_ROLE_ID)
+    detail = await _create(session, await _user(session))
+    await Order(session).add_status(
+        detail.order.id, StatusChangeCreate(status=ORDER_STATUS_DELIVERED_ID), admin
+    )
+    await Order(session).cancel(detail.order.id, admin)
+    refreshed = await Order(session).get(detail.order.id, admin)
+    assert refreshed.order.delivered_at is None

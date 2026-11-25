@@ -10,6 +10,7 @@ from app.utils.constant import (
     ADMIN_OPERATOR_ROLE_ID,
     ORDER_STATUS_CANCELLED_ID,
     ORDER_STATUS_CREATED_ID,
+    ORDER_STATUS_DELIVERED_ID,
     SUPER_ADMIN_ROLE_ID,
 )
 
@@ -44,6 +45,7 @@ async def seed_references(session: AsyncSession) -> None:
         (ADMIN_OPERATOR_ROLE_ID, "admin_operator"),
         (ORDER_STATUS_CANCELLED_ID, "order_cancelled"),
         (ORDER_STATUS_CREATED_ID, "order_created"),
+        (ORDER_STATUS_DELIVERED_ID, "order_delivered"),
     ):
         await session.execute(
             text(
