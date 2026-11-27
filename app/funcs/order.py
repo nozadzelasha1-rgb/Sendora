@@ -30,6 +30,7 @@ from app.utils.constant import (
     ORDER_ADMIN_ROLE_IDS,
     ORDER_STATUS_CANCELLED_ID,
     ORDER_STATUS_CREATED_ID,
+    ORDER_STATUS_DELIVERED_ID,
 )
 from app.utils.exception import (
     InvalidOrderReferenceError,
@@ -448,9 +449,16 @@ class Order:
             changed_by=user.id,
         )
 
+        now = datetime.now(UTC)
+
         async def _apply() -> None:
-            detail.order.status = data.status
-            detail.order.updated_at = datetime.now(UTC)
+            order = detail.order
+            order.status = data.status
+            order.updated_at = now
+            if data.status == ORDER_STATUS_DELIVERED_ID:
+                order.delivered_at = now
+            elif order.delivered_at is not None:
+                order.delivered_at = None
             self.session.add(history)
 
         await self._run(_apply)
@@ -473,6 +481,7 @@ class Order:
         async def _apply() -> None:
             detail.order.status = ORDER_STATUS_CANCELLED_ID
             detail.order.updated_at = datetime.now(UTC)
+            detail.order.delivered_at = None
             self.session.add(history)
 
         await self._run(_apply)

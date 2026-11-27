@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings
 from app.funcs.organization import Organization
-from app.utils.constant import ADMIN_OPERATOR_ROLE_ID, SUPER_ADMIN_ROLE_ID
+from app.utils.constant import (
+    ADMIN_OPERATOR_ROLE_ID,
+    ORDER_STATUS_CANCELLED_ID,
+    ORDER_STATUS_CREATED_ID,
+    ORDER_STATUS_DELIVERED_ID,
+    SUPER_ADMIN_ROLE_ID,
+)
 from tests.seed import TEST_ORG_ID, TEST_ROLE_ID
 
 USERS_URL = f"{settings.API_PREFIX}/users"
@@ -146,7 +152,7 @@ async def test_sender_creates_order_for_own_organization(
     _, headers = await _user(session, client, bearer_headers, "sender")
     body = await _create_order(client, headers)
 
-    assert body["status"] == 2
+    assert body["status"] == ORDER_STATUS_CREATED_ID
     assert body["organization_id"] == str(TEST_ORG_ID)
     assert "external_order_id" not in body
     assert body["tracking_number"].startswith("SND")
@@ -396,9 +402,11 @@ async def test_admin_cancels_order_idempotently(
     assert second.status_code == 204
 
     fetched = await client.get(f"{ORDERS_URL}/{created['id']}", headers=admin)
-    assert fetched.json()["status"] == 1
+    assert fetched.json()["status"] == ORDER_STATUS_CANCELLED_ID
     cancelled = [
-        item for item in fetched.json()["status_history"] if item["status"] == 1
+        item
+        for item in fetched.json()["status_history"]
+        if item["status"] == ORDER_STATUS_CANCELLED_ID
     ]
     assert len(cancelled) == 1
 
@@ -454,3 +462,31 @@ async def test_list_rejects_malformed_user_id(
     admin = await _admin(session, client, bearer_headers)
     response = await client.get(f"{ORDERS_URL}?user_id=not-a-uuid", headers=admin)
     assert response.status_code == 422
+
+
+# --- delivered_at ----------------------------------------------------------------
+
+
+async def test_delivered_status_sets_delivered_at_and_reopen_clears_it(
+    client: AsyncClient, bearer_headers: BearerHeaders, session: AsyncSession
+) -> None:
+    admin = await _admin(session, client, bearer_headers)
+    _, sender = await _user(session, client, bearer_headers, "sender")
+    created = await _create_order(client, sender)
+    url = f"{ORDERS_URL}/{created['id']}"
+
+    delivered = await client.post(
+        f"{url}/status-history",
+        json={"status": ORDER_STATUS_DELIVERED_ID},
+        headers=admin,
+    )
+    assert delivered.status_code == 201, delivered.text
+    after_delivery = (await client.get(url, headers=admin)).json()
+    assert after_delivery["status"] == ORDER_STATUS_DELIVERED_ID
+    assert after_delivery["delivered_at"] is not None
+
+    reopened = await client.post(
+        f"{url}/status-history", json={"status": ORDER_STATUS_CREATED_ID}, headers=admin
+    )
+    assert reopened.status_code == 201, reopened.text
+    assert (await client.get(url, headers=admin)).json()["delivered_at"] is None
